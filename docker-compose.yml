@@ -39,6 +39,8 @@ services:
         # arg (Compose las toma del .env de la raíz) y no alcanza con
         # declararlas en `environment`.
         NEXT_PUBLIC_GOOGLE_MAPS_API_KEY: ${NEXT_PUBLIC_GOOGLE_MAPS_API_KEY:-}
+        NEXT_PUBLIC_META_APP_ID: ${NEXT_PUBLIC_META_APP_ID:-}
+        NEXT_PUBLIC_META_WHATSAPP_CONFIG_ID: ${NEXT_PUBLIC_META_WHATSAPP_CONFIG_ID:-}
     restart: unless-stopped
     env_file:
       - .env

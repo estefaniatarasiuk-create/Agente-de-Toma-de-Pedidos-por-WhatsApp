@@ -24,5 +24,7 @@ export default auth((req) => {
 });
 
 export const config = {
-  matcher: ["/((?!api/auth|api/registro|_next/static|_next/image|favicon.ico).*)"],
+  // api/webhooks/*: los llama Meta directamente (sin cookies de sesión),
+  // van protegidos por verificación de firma/token en la propia ruta.
+  matcher: ["/((?!api/auth|api/registro|api/webhooks|_next/static|_next/image|favicon.ico).*)"],
 };

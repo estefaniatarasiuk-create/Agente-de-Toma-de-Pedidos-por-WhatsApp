@@ -109,7 +109,8 @@ model WhatsAppLine {
   branchId  String @unique
 
   status               WhatsAppLineStatus @default(PENDING)
-  phoneNumberId        String?
+  // Único: así el webhook resuelve a qué sucursal pertenece un mensaje entrante.
+  phoneNumberId        String?            @unique
   wabaId               String?
   businessAccountId    String?
   displayPhoneNumber   String?
@@ -117,6 +118,9 @@ model WhatsAppLine {
   // Access token de la línea, cifrado en reposo (ver lib/crypto).
   accessTokenEncrypted String?
   tokenExpiresAt       DateTime?
+  // PIN de verificación en dos pasos generado al registrar el número
+  // (lo pide Meta para volver a registrar/recuperar la línea), cifrado.
+  twoStepPinEncrypted  String?
   lastErrorMessage     String?
   connectedAt          DateTime?
 

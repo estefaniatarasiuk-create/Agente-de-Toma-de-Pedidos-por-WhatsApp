@@ -14,7 +14,7 @@ WhatsApp` (ver historias de usuario E1–E11).
 - **Frontend + Backend**: Next.js 16 (App Router) + TypeScript.
 - **Base de datos**: PostgreSQL + Prisma ORM (driver adapter `@prisma/adapter-pg`).
 - **Jobs/timers**: BullMQ + Redis (se incorpora en Fase 3).
-- **WhatsApp**: Meta WhatsApp Cloud API (se incorpora en Fase 2).
+- **WhatsApp**: Meta WhatsApp Cloud API (Embedded Signup + webhooks desde Fase 2; envío de mensajes en Fase 3).
 - **IA conversacional**: OpenAI o Anthropic, configurable por variable de entorno (carga asistida desde Fase 1; motor de pedidos en Fase 3).
 - **Mapas/geocodificación**: Google Maps Geocoding API + Maps JavaScript API.
 - **Auth**: email + contraseña con sesiones JWT (Auth.js / NextAuth v5).
@@ -24,7 +24,7 @@ WhatsApp` (ver historias de usuario E1–E11).
 
 - [x] **Fase 0** — Esqueleto: repo, docker-compose, schema Prisma completo, auth, layout base.
 - [x] **Fase 1** — Configuración del negocio (catálogo, horarios, zona, IA, medios de pago).
-- [ ] Fase 2 — Vinculación de WhatsApp (Embedded Signup, webhooks).
+- [x] **Fase 2** — Vinculación de WhatsApp (Embedded Signup, webhooks).
 - [ ] Fase 3 — Motor de pedidos (máquina de estados, IA, comprobante).
 - [ ] Fase 4 — Operación (tablero, conversaciones en vivo).
 - [ ] Fase 5 — Métricas y cierre.
@@ -58,6 +58,21 @@ Completá al menos:
   cliente durante el build de Docker, no en runtime — si la cambiás después
   de un primer `docker compose up --build`, tenés que volver a buildear
   (`docker compose up --build`, no solo `up -d`) para que tome efecto.
+- Para vincular WhatsApp (Fase 2) necesitás una app en
+  [Meta for Developers](https://developers.facebook.com/) con el producto
+  **WhatsApp** agregado y el **Embedded Signup** configurado (Meta App
+  Dashboard → WhatsApp → Embedded Signup → creás una "Configuration"). De ahí
+  sacás: `NEXT_PUBLIC_META_APP_ID`, `META_APP_SECRET` y
+  `NEXT_PUBLIC_META_WHATSAPP_CONFIG_ID`. `WHATSAPP_WEBHOOK_VERIFY_TOKEN` lo
+  elegís vos (cualquier string) y lo cargás igual en Meta al configurar la
+  URL del webhook (`https://tu-dominio/api/webhooks/whatsapp`). También
+  necesitás `TOKEN_ENCRYPTION_KEY` (`openssl rand -hex 32`) para cifrar en
+  reposo el access token de la línea. En desarrollo local, como Meta necesita
+  una URL pública para mandarte los webhooks, usá un túnel (ej.
+  [ngrok](https://ngrok.com/): `ngrok http 3000`) y cargá esa URL en Meta.
+  Igual que con Google Maps, `NEXT_PUBLIC_META_APP_ID` y
+  `NEXT_PUBLIC_META_WHATSAPP_CONFIG_ID` se hornean en build time: cambiarlas
+  requiere `docker compose up --build`.
 
 ### Levantar todo con Docker Compose
 
@@ -142,6 +157,59 @@ horarios, zona, pagos, tono) sin registrar ningún pedido real.
 **Multi-tenant**: todo lo anterior queda aislado por `companyId`/`branchId`;
 las rutas de API validan la sesión con `requireBranchContext()` y devuelven
 401 sin sesión válida.
+
+### Verificación de la Fase 2
+
+**Requiere una app de Meta real configurada** (ver "Variables de entorno"
+más arriba) para probar la vinculación de punta a punta. Lo que sí se puede
+verificar sin eso:
+
+1. `/whatsapp` sin ninguna línea vinculada → muestra "Todavía no vinculaste
+   ninguna línea" y el botón "Conectar línea de WhatsApp".
+2. Si faltan `NEXT_PUBLIC_META_APP_ID` / `NEXT_PUBLIC_META_WHATSAPP_CONFIG_ID`,
+   se ve un aviso amarillo explicándolo en vez de romper la página.
+
+**Con una app de Meta configurada:**
+
+3. Clic en "Conectar línea de WhatsApp" → se abre el popup de Facebook
+   (Embedded Signup) → completás el alta/selección del número → al cerrar el
+   popup, la pantalla pasa a "Vinculando..." y después muestra estado
+   **Activa**, el número y el nombre verificado.
+4. Mandale un mensaje de WhatsApp a ese número desde tu celular → tiene que
+   aparecer en la base: `webhook_events` (el payload crudo, status
+   `PROCESSED`), `conversations` (una fila por número de cliente) y
+   `messages` (el texto, `whatsappMessageId` único). Todavía no hay
+   respuesta automática — eso es la Fase 3.
+5. Volvé a mandar el mismo webhook (o que Meta reintente) → no se duplica
+   ni la conversación ni el mensaje (`whatsappMessageId` es único, se
+   ignora el evento repetido).
+6. Sacale la firma o mandala mal → `POST /api/webhooks/whatsapp` devuelve
+   401 sin procesar nada.
+
+**Sin app de Meta**, igual se puede probar la lógica de verificación y
+firma del webhook a mano — con `WHATSAPP_WEBHOOK_VERIFY_TOKEN` y
+`META_APP_SECRET` cargados en el `.env` (podés inventar valores para
+desarrollo local):
+
+```bash
+# Handshake de verificación (lo que hace Meta al configurar la URL)
+curl "http://localhost:3000/api/webhooks/whatsapp?hub.mode=subscribe&hub.verify_token=TU_TOKEN&hub.challenge=12345"
+# Tiene que devolver: 12345
+```
+
+## Pendientes de pulido (para el cierre, Fase 5)
+
+Detectados probando la Fase 1, decidimos no resolverlos todavía porque no
+bloquean funcionalidad — quedan anotados para no perderlos:
+
+- **Avisar cuando el chequeo de contradicciones de IA no se pudo ejecutar**
+  (`POST /api/ia/config`, función `checkContradictions`). Hoy, si la
+  llamada al LLM falla (sin `AI_PROVIDER` configurado, error de red, etc.),
+  se traga el error y devuelve `warnings: []` — el usuario ve "guardado
+  correctamente" como si no hubiera contradicciones, en vez de un aviso de
+  que no se pudo verificar.
+- **Revisar contraste de colores** en textos que quedan muy parecidos al
+  fondo en algunas pantallas (reportado en `/catalogo` y alrededores).
 
 ## Decisiones tomadas
 
@@ -228,21 +296,52 @@ las rutas de API validan la sesión con `requireBranchContext()` y devuelven
   (`DraftProduct`) y comparten `POST /api/catalogo/importar/confirmar` para
   el alta real: la escritura en la base es siempre la misma operación
   determinística, sea cual sea el origen de los datos.
+- **Fase 2 recibe y persiste, no responde.** `POST /api/webhooks/whatsapp`
+  guarda el payload crudo (idempotencia vía `WebhookEvent.externalId`) y
+  vuelca los mensajes entrantes a `Conversation`/`Message`, pero no envía
+  ninguna respuesta automática: la conversación con el cliente (motor de
+  pedidos, IA, reglas duras) es explícitamente el alcance de la Fase 3. Acá
+  solo se deja la línea operativa y los mensajes ya guardados esperando ese
+  motor.
+- **`phoneNumberId` único en `WhatsAppLine`.** Es la clave con la que el
+  webhook resuelve a qué sucursal pertenece un mensaje entrante (Meta manda
+  el `phone_number_id` en cada payload, nunca el id de nuestra sucursal).
+  De paso, evita que dos sucursales terminen compartiendo sin querer la
+  misma línea.
+- **Access token y PIN de la línea cifrados en reposo.** `WhatsAppLine`
+  guarda `accessTokenEncrypted`/`twoStepPinEncrypted` con AES-256-GCM
+  (`src/lib/crypto.ts`, clave en `TOKEN_ENCRYPTION_KEY`) en vez de texto
+  plano — son credenciales de larga vida que permiten enviar mensajes en
+  nombre del comercio. Ninguna respuesta de API los expone (`toSafeLine`
+  los excluye siempre).
+- **Verificación de firma en el webhook, no autenticación de sesión.**
+  `/api/webhooks/whatsapp` está fuera del `proxy.ts` (Meta no manda
+  cookies): su seguridad es la verificación HMAC-SHA256 del header
+  `X-Hub-Signature-256` contra `META_APP_SECRET`, más el `hub.verify_token`
+  en el handshake GET inicial.
+- **Descarga de medios en Fase 2, transcripción en Fase 3.** Las imágenes,
+  audios y documentos que llegan por WhatsApp ya se descargan y guardan
+  (vía la Graph API) al persistir el mensaje, pero `Message.transcription`
+  queda vacío — la transcripción de audio con Whisper es tarea del motor de
+  pedidos (Fase 3), que es quien necesita el texto para conversar.
 
 ## Estructura del repo
 
 ```
 prisma/schema.prisma       Schema completo (todas las entidades E1–E11)
 prisma.config.ts           Config de Prisma Migrate (Prisma 7)
-src/lib/ai/                Abstracción de LLM (OpenAI/Anthropic), log de uso, prompt de sucursal
-src/lib/validations/       Schemas de zod por dominio (producto, horarios, zona, pagos, IA, auth)
+src/lib/ai/                 Abstracción de LLM (OpenAI/Anthropic), log de uso, prompt de sucursal
+src/lib/whatsapp/           Graph API de Meta, verificación de firma, procesamiento de webhooks
+src/lib/validations/        Schemas de zod por dominio (producto, horarios, zona, pagos, IA, auth)
 src/lib/geocoding.ts        Normalización de direcciones + cache + Google Geocoding API
 src/lib/uploads.ts          Guardado/lectura de archivos subidos (disco + volumen)
 src/lib/catalog-image.tsx   Render determinístico de la imagen de catálogo (next/og)
+src/lib/crypto.ts           Cifrado en reposo de tokens/secretos (AES-256-GCM)
 src/lib/                    Prisma client, auth, helpers
 src/app/(auth)/              Login y registro
 src/app/(dashboard)/         Panel autenticado (layout + una carpeta por sección/épica)
-src/app/api/                 Rutas de API (auth, registro, catálogo, horarios, zona, pagos, IA, uploads)
+src/app/api/                 Rutas de API (auth, registro, catálogo, horarios, zona, pagos, IA, WhatsApp, uploads)
+src/app/api/webhooks/        Endpoints públicos que llama Meta directamente (sin sesión)
 src/proxy.ts                 Protección de rutas (login requerido / redirect)
 docker-compose.yml           app + postgres + redis, volumen de uploads
 Dockerfile                   Build multi-stage de la app (standalone output)
