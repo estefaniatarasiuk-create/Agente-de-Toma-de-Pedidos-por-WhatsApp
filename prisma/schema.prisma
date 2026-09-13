@@ -316,6 +316,12 @@ model Conversation {
   status        ConversationStatus @default(ACTIVE)
   // Paso vigente de la máquina de estados del pedido en curso (spec §3.2).
   currentStep   String?
+  // Pedido en construcción (items, datos de entrega, medio de pago) mientras
+  // se arma por chat. Se limpia al confirmar o expirar. Los precios acá son
+  // solo referencia de lo último calculado; al confirmar se recalculan de
+  // cero contra el catálogo vigente (nunca se confía en el número que trae
+  // el borrador ni en lo que "diga" el modelo).
+  draftOrder    Json?
   lastMessageAt DateTime           @default(now())
 
   createdAt DateTime @default(now())

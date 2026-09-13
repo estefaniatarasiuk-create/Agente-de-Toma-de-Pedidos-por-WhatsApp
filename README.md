@@ -13,9 +13,9 @@ WhatsApp` (ver historias de usuario E1–E11).
 
 - **Frontend + Backend**: Next.js 16 (App Router) + TypeScript.
 - **Base de datos**: PostgreSQL + Prisma ORM (driver adapter `@prisma/adapter-pg`).
-- **Jobs/timers**: BullMQ + Redis (se incorpora en Fase 3).
-- **WhatsApp**: Meta WhatsApp Cloud API (Embedded Signup + webhooks desde Fase 2; envío de mensajes en Fase 3).
-- **IA conversacional**: OpenAI o Anthropic, configurable por variable de entorno (carga asistida desde Fase 1; motor de pedidos en Fase 3).
+- **Jobs/timers**: BullMQ + Redis (worker propio desde Fase 3: recordatorio/cancelación de comprobante, vencimiento de conversación).
+- **WhatsApp**: Meta WhatsApp Cloud API (Embedded Signup + webhooks desde Fase 2; conversación real, envío de mensajes y transcripción de audio con Whisper desde Fase 3).
+- **IA conversacional**: OpenAI o Anthropic, configurable por variable de entorno (carga asistida desde Fase 1; motor de pedidos real desde Fase 3).
 - **Mapas/geocodificación**: Google Maps Geocoding API + Maps JavaScript API.
 - **Auth**: email + contraseña con sesiones JWT (Auth.js / NextAuth v5).
 - **Deploy local/dev**: docker-compose (app + Postgres + Redis).
@@ -25,7 +25,7 @@ WhatsApp` (ver historias de usuario E1–E11).
 - [x] **Fase 0** — Esqueleto: repo, docker-compose, schema Prisma completo, auth, layout base.
 - [x] **Fase 1** — Configuración del negocio (catálogo, horarios, zona, IA, medios de pago).
 - [x] **Fase 2** — Vinculación de WhatsApp (Embedded Signup, webhooks).
-- [ ] Fase 3 — Motor de pedidos (máquina de estados, IA, comprobante).
+- [x] **Fase 3** — Motor de pedidos (máquina de estados, IA, comprobante, worker de BullMQ).
 - [ ] Fase 4 — Operación (tablero, conversaciones en vivo).
 - [ ] Fase 5 — Métricas y cierre.
 
@@ -80,8 +80,11 @@ Completá al menos:
 docker compose up --build
 ```
 
-Esto levanta Postgres, Redis y la app (corre `prisma migrate deploy` al
-iniciar). La app queda disponible en `http://localhost:3000`.
+Esto levanta Postgres, Redis, la app (corre `prisma migrate deploy` al
+iniciar) y el **worker** de BullMQ (Fase 3: recordatorio/cancelación de
+comprobante, vencimiento de conversación) — mismo build, corriendo
+`src/worker/index.ts` como proceso aparte. La app queda disponible en
+`http://localhost:3000`.
 
 ### Desarrollo local (sin dockerizar la app)
 
@@ -92,7 +95,18 @@ npm run db:migrate   # aplica las migraciones (crea una nueva si el schema cambi
 npm run dev
 ```
 
-La app queda en `http://localhost:3000`.
+En otra terminal, si vas a probar pedidos por transferencia o el
+vencimiento de conversación (Fase 3), levantá también el worker:
+
+```bash
+npm run worker        # una vez
+npm run worker:dev    # o con reinicio automático al editar código
+```
+
+La app queda en `http://localhost:3000`. Sin el worker corriendo, los
+pedidos y conversaciones se arman igual — lo único que no dispara son los
+recordatorios/cancelaciones/vencimientos por tiempo, que quedan encolados
+en Redis hasta que el worker esté levantado.
 
 ### Verificación de la Fase 0
 
@@ -196,6 +210,52 @@ desarrollo local):
 curl "http://localhost:3000/api/webhooks/whatsapp?hub.mode=subscribe&hub.verify_token=TU_TOKEN&hub.challenge=12345"
 # Tiene que devolver: 12345
 ```
+
+### Verificación de la Fase 3
+
+**Tests automáticos** (rutas críticas, contra una base Postgres real —
+requiere `docker compose up -d postgres redis` y `DATABASE_URL` migrada):
+
+```bash
+npm test
+```
+
+Cubren: pedido feliz en efectivo (recalcula precios desde el catálogo,
+ignora lo que traiga el borrador), domicilio fuera de zona (corta el
+armado del pedido y avisa), fuera de horario (no invoca a la IA), no
+sustitución silenciosa de productos que no están en el catálogo (el bug de
+"Fanta → Coca-Cola" de la Fase 1), y la regla de seguridad del comprobante
+(un pedido con comprobante adjunto **nunca** se cancela automáticamente,
+sin importar cuánto tiempo pasó).
+
+**De punta a punta, con WhatsApp real** (con una línea ya vinculada en
+Fase 2):
+
+1. Mandale un mensaje de texto pidiendo algo del catálogo → la IA responde
+   por WhatsApp confirmando el ítem; pedile algo que no está → te ofrece
+   alternativas del catálogo real en vez de inventar o sustituir en
+   silencio.
+2. Dale tu nombre y una dirección lejos de la zona configurada → corta el
+   pedido en curso y te avisa que está fuera de zona (no lo toma igual).
+3. Completá un pedido y elegí "efectivo" → queda en estado `PENDING` con
+   demora estimada según `Branch.currentDelayMinutes`; elegí
+   "transferencia" → te manda los datos bancarios reales configurados y
+   queda `WAITING_RECEIPT`.
+4. Para un pedido `WAITING_RECEIPT`: mandale una foto (de lo que sea) →
+   se adjunta como comprobante sin pasar por la IA y el pedido queda
+   esperando validación manual (Fase 4). Con el worker corriendo y
+   `Branch.receiptReminderMinutes`/`receiptCancelMinutes` bajados a un
+   valor chico para probar, verificá que llega el recordatorio y, si nunca
+   mandás el comprobante, que se cancela solo — pero si lo mandás antes
+   (aunque sea después del recordatorio), nunca se cancela.
+5. Mandale un audio → se transcribe con Whisper (necesita
+   `OPENAI_API_KEY`, sea cual sea el `AI_PROVIDER`) y la IA responde como
+   si hubieras escrito el mismo texto.
+6. Escribí fuera del horario configurado → responde el horario de
+   atención sin invocar a la IA.
+7. Escribí "quiero hablar con una persona" → la conversación pasa a
+   `REQUIRES_ATTENTION` y deja de responder automáticamente (Fase 4 le
+   devuelve el control a un humano).
 
 ## Pendientes de pulido (para el cierre, Fase 5)
 
@@ -324,15 +384,67 @@ bloquean funcionalidad — quedan anotados para no perderlos:
   (vía la Graph API) al persistir el mensaje, pero `Message.transcription`
   queda vacío — la transcripción de audio con Whisper es tarea del motor de
   pedidos (Fase 3), que es quien necesita el texto para conversar.
+- **La IA nunca escribe el pedido directamente: propone acciones, el
+  código las valida y ejecuta.** Cada turno, el modelo devuelve un JSON con
+  un texto conversacional y una lista de "acciones" tipadas (`add_item`,
+  `set_customer_info`, `confirm_order`, etc. — `src/lib/validations/order-engine.ts`).
+  `src/lib/orders/apply-actions.ts` es el único lugar que las ejecuta contra
+  la base: valida cada producto contra el catálogo real
+  (`findProductMatch`), cada domicilio contra la zona configurada
+  (`validateDeliveryAddress`), y recalcula precios desde cero al confirmar
+  (`createOrderFromDraft`). Esto es lo que corrige los dos bugs que
+  encontró el usuario probando el preview de la Fase 1: ya no se sustituye
+  un producto inexistente en silencio (se avisa y se ofrecen alternativas)
+  ni se acepta un domicilio fuera de zona (corta el pedido en curso).
+- **Horario y comprobante se resuelven en código, nunca le preguntan a la
+  IA.** `isWithinBusinessHours` y el auto-adjuntado de comprobante
+  (`processInboundMessage`, pasos 1 y 2) cortan el turno antes de invocar
+  al modelo — spec §3.3/§3.4. Evita que un horario mal interpretado por la
+  IA le diga a un cliente que está abierto cuando no lo está, o que un
+  comprobante real dependa de que el modelo "entienda" que eso es lo que
+  se mandó.
+- **Circuito de comprobante con jobs idempotentes, no cancelables.**
+  `scheduleReceiptJobs`/`scheduleConversationExpiry` (BullMQ) no se
+  cancelan explícitamente cuando el estado cambia antes de tiempo (por
+  ejemplo, llega el comprobante antes del recordatorio): cada job relee el
+  pedido/conversación al dispararse y no hace nada si el estado ya no es
+  el que esperaba (`src/worker/handlers.ts`). Es más simple y más seguro
+  que mantener sincronizado un mapa de "jobs pendientes por cancelar", y
+  hace que la regla de seguridad del comprobante (nunca cancelar si ya hay
+  `receiptUrl`) sea imposible de saltear por una carrera entre jobs.
+- **Worker como proceso aparte, corriendo el código fuente con `tsx`.** El
+  build "standalone" de Next solo empaqueta lo necesario para las rutas
+  HTTP; el worker de BullMQ no es una ruta HTTP, así que la imagen de
+  Docker copia además `src/` y corre `npx tsx src/worker/index.ts`
+  reutilizando la misma imagen que la app (ver `docker-compose.yml`,
+  servicio `worker`).
+- **Transcripción de audio: Whisper de OpenAI, independiente de
+  `AI_PROVIDER`.** El encargo fija Whisper para transcribir audios sea cual
+  sea el proveedor elegido para conversar — `transcribeAudio()`
+  (`src/lib/ai/transcribe-audio.ts`) siempre usa `OPENAI_API_KEY`, incluso
+  con `AI_PROVIDER=anthropic`. Cada llamada se loguea en `AIUsageLog` igual
+  que las conversacionales (con costo, purpose `AUDIO_TRANSCRIPTION`).
+- **Tests de integración contra Postgres real, no contra mocks de
+  Prisma.** Las rutas críticas del motor de pedidos hacen muchas consultas
+  encadenadas (catálogo, zona, horarios, pagos) — mockear el cliente de
+  Prisma hubiera significado re-implementar esa lógica en los mocks. En
+  cambio, cada test crea su propia `Company`/`Branch` con datos únicos y
+  la borra al final (el borrado cascadea, ver schema); lo único que se
+  mockea es `geocodeAddress` (llamaría a la API real de Google Maps y
+  necesitaría una key en cada corrida de tests).
 
 ## Estructura del repo
 
 ```
 prisma/schema.prisma       Schema completo (todas las entidades E1–E11)
 prisma.config.ts           Config de Prisma Migrate (Prisma 7)
-src/lib/ai/                 Abstracción de LLM (OpenAI/Anthropic), log de uso, prompt de sucursal
-src/lib/whatsapp/           Graph API de Meta, verificación de firma, procesamiento de webhooks
-src/lib/validations/        Schemas de zod por dominio (producto, horarios, zona, pagos, IA, auth)
+src/lib/ai/                 Abstracción de LLM (OpenAI/Anthropic), log de uso, prompt de sucursal, Whisper
+src/lib/whatsapp/           Graph API de Meta, verificación de firma, procesamiento de webhooks, envío de mensajes
+src/lib/orders/              Motor de pedidos (Fase 3): horarios, matching de catálogo, zona, prompt,
+                             aplicación de acciones, creación de pedido, mensajes deterministas, orquestador (engine.ts)
+src/lib/jobs/                 Colas de BullMQ (recordatorio/cancelación de comprobante, vencimiento de conversación)
+src/worker/                   Proceso del worker (index.ts conecta BullMQ, handlers.ts tiene la lógica de cada job)
+src/lib/validations/        Schemas de zod por dominio (producto, horarios, zona, pagos, IA, auth, pedido)
 src/lib/geocoding.ts        Normalización de direcciones + cache + Google Geocoding API
 src/lib/uploads.ts          Guardado/lectura de archivos subidos (disco + volumen)
 src/lib/catalog-image.tsx   Render determinístico de la imagen de catálogo (next/og)
@@ -343,6 +455,7 @@ src/app/(dashboard)/         Panel autenticado (layout + una carpeta por secció
 src/app/api/                 Rutas de API (auth, registro, catálogo, horarios, zona, pagos, IA, WhatsApp, uploads)
 src/app/api/webhooks/        Endpoints públicos que llama Meta directamente (sin sesión)
 src/proxy.ts                 Protección de rutas (login requerido / redirect)
-docker-compose.yml           app + postgres + redis, volumen de uploads
-Dockerfile                   Build multi-stage de la app (standalone output)
+tests/                       Tests de Vitest de las rutas críticas del motor de pedidos (Fase 3)
+docker-compose.yml           app + worker + postgres + redis, volumen de uploads
+Dockerfile                   Build multi-stage de la app (standalone output) + fuente para el worker
 ```

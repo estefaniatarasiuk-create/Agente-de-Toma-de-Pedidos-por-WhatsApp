@@ -9,7 +9,10 @@
     "lint": "eslint",
     "postinstall": "prisma generate",
     "db:migrate": "prisma migrate dev",
-    "db:studio": "prisma studio"
+    "db:studio": "prisma studio",
+    "worker": "tsx src/worker/index.ts",
+    "worker:dev": "tsx watch src/worker/index.ts",
+    "test": "vitest run"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.125.0",
@@ -17,6 +20,8 @@
     "@prisma/client": "^7.10.0",
     "@react-google-maps/api": "^2.20.8",
     "bcryptjs": "^3.0.3",
+    "bullmq": "^6.3.4",
+    "ioredis": "^6.0.0",
     "next": "16.3.5",
     "next-auth": "^5.0.0-beta.32",
     "openai": "^7.15.0",
@@ -38,6 +43,9 @@
     "eslint-config-next": "16.3.5",
     "prisma": "^7.10.0",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "tsx": "^4.23.13",
+    "typescript": "^5",
+    "vite": "^8.3.0",
+    "vitest": "^5.0.0"
   }
 }

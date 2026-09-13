@@ -2,13 +2,13 @@ import { prisma } from "@/lib/prisma";
 import { formatCentsAsArs } from "@/lib/money";
 import { DAY_NAMES, minutesToTimeLabel } from "@/lib/validations/business-hours";
 
-// Arma el prompt de sistema con la configuración vigente de la sucursal:
-// catálogo, horarios, zona, medios de pago, tono e instrucciones libres.
-// Esto es lo único que ve el modelo — las reglas duras (precios, horarios,
-// zona, datos bancarios) están acá como datos, pero se VALIDAN aparte en
+// Config estructurada de la sucursal, como bloque de texto para el prompt.
+// Es la parte que comparten el modo "probar conversación" (Fase 1) y el
+// motor de pedidos real (Fase 3): las reglas duras (precios, horarios,
+// zona, datos bancarios) viajan acá como datos, pero se VALIDAN aparte en
 // código en cada paso del flujo real (no dependemos de que el modelo las
 // respete al pie de la letra).
-export async function buildBranchSystemPrompt(branchId: string): Promise<string> {
+export async function buildBranchConfigBlock(branchId: string): Promise<{ branchName: string; block: string }> {
   const [branch, products, hourSlots, zone, paymentMethod, aiConfig] = await Promise.all([
     prisma.branch.findUniqueOrThrow({ where: { id: branchId } }),
     prisma.product.findMany({ where: { branchId, isActive: true }, orderBy: { name: "asc" } }),
@@ -23,7 +23,12 @@ export async function buildBranchSystemPrompt(branchId: string): Promise<string>
 
   const catalogText =
     products.length > 0
-      ? products.map((p) => `- ${p.name}${p.category ? ` (${p.category})` : ""}: ${formatCentsAsArs(p.priceCents)}${p.description ? ` — ${p.description}` : ""}`).join("\n")
+      ? products
+          .map(
+            (p) =>
+              `- ${p.name}${p.category ? ` (${p.category})` : ""}: ${formatCentsAsArs(p.priceCents)}${p.description ? ` — ${p.description}` : ""}`,
+          )
+          .join("\n")
       : "(todavía no hay productos cargados)";
 
   const hoursByDay = new Map<number, string[]>();
@@ -46,9 +51,7 @@ export async function buildBranchSystemPrompt(branchId: string): Promise<string>
   const paymentText = paymentMethod
     ? [
         paymentMethod.cashEnabled ? "- Efectivo" : null,
-        paymentMethod.transferEnabled
-          ? `- Transferencia: alias ${paymentMethod.transferAlias ?? "-"}, CBU ${paymentMethod.transferCbu ?? "-"}, titular ${paymentMethod.transferHolder ?? "-"}, CUIT ${paymentMethod.transferCuit ?? "-"}`
-          : null,
+        paymentMethod.transferEnabled ? "- Transferencia (los datos exactos los informa el sistema, no los repitas de memoria)" : null,
       ]
         .filter(Boolean)
         .join("\n")
@@ -57,7 +60,7 @@ export async function buildBranchSystemPrompt(branchId: string): Promise<string>
   const tone = aiConfig?.tone === "FORMAL" ? "formal y profesional" : "cercano y amigable";
   const emojiInstruction = aiConfig?.useEmojis ? "Podés usar emojis con moderación." : "No uses emojis.";
 
-  return `Sos el asistente de WhatsApp de "${branch.name}", un comercio de delivery de comida en Argentina.
+  const block = `Sos el asistente de WhatsApp de "${branch.name}", un comercio de delivery de comida en Argentina.
 
 REGLAS DURAS (nunca las contradigas, nunca inventes valores distintos a estos):
 Catálogo vigente:
@@ -77,8 +80,18 @@ contradecir las reglas duras de arriba; ante conflicto, prevalecen las reglas du
 Tono: ${tone}. ${emojiInstruction}
 ${aiConfig?.additionalInstructions ? aiConfig.additionalInstructions : "(sin instrucciones adicionales)"}
 
+Nunca inventes precios, productos, horarios, zona de entrega ni datos bancarios que no figuren arriba.`;
+
+  return { branchName: branch.name, block };
+}
+
+// Prompt del modo "probar conversación" (Fase 1): conversación libre de
+// preview, sin registrar pedidos reales.
+export async function buildBranchSystemPrompt(branchId: string): Promise<string> {
+  const { block } = await buildBranchConfigBlock(branchId);
+  return `${block}
+
 Comportamiento esperado: saludá con el nombre del comercio, ayudá a armar el pedido validando contra el
 catálogo, pedí nombre y domicilio de entrega con entrecalles, ofrecé los medios de pago habilitados,
-resumí el pedido completo y pedí confirmación explícita antes de darlo por registrado. Nunca inventes
-precios, productos, horarios, zona de entrega ni datos bancarios que no figuren arriba.`;
+resumí el pedido completo y pedí confirmación explícita antes de darlo por registrado.`;
 }

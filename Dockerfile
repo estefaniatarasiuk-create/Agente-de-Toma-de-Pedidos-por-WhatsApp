@@ -36,6 +36,11 @@ COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 COPY --from=builder /app/prisma ./prisma
 COPY --from=builder /app/prisma.config.ts ./prisma.config.ts
+# El worker de BullMQ (Fase 3) corre como proceso aparte del server web, vía
+# tsx directo sobre el código fuente (no pasa por el build "standalone" de
+# Next, que solo empaqueta lo que usan las rutas HTTP).
+COPY --from=builder --chown=nextjs:nodejs /app/src ./src
+COPY --from=builder /app/tsconfig.json ./tsconfig.json
 
 # Punto de montaje del volumen de archivos subidos (fotos de catálogo,
 # comprobantes): se crea con el dueño correcto para que el proceso

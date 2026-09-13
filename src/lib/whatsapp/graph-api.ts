@@ -82,6 +82,74 @@ export async function registerPhoneNumber(
   });
 }
 
+// Manda un mensaje de texto de vuelta al cliente. Como siempre respondemos
+// dentro de la ventana de servicio de 24 hs (el cliente escribió primero),
+// no hace falta una plantilla aprobada por Meta.
+export async function sendWhatsAppTextMessage(params: {
+  phoneNumberId: string;
+  accessToken: string;
+  to: string;
+  text: string;
+}): Promise<{ messageId: string }> {
+  const data = await graphFetch<{ messages: Array<{ id: string }> }>(`/${params.phoneNumberId}/messages`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${params.accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      messaging_product: "whatsapp",
+      to: params.to,
+      type: "text",
+      text: { body: params.text },
+    }),
+  });
+  return { messageId: data.messages[0].id };
+}
+
+// Sube un archivo (ej: imagen del catálogo) y devuelve el media id de Meta,
+// para mandarlo como mensaje de imagen sin depender de una URL pública.
+export async function uploadWhatsAppMedia(params: {
+  phoneNumberId: string;
+  accessToken: string;
+  buffer: Buffer;
+  mimeType: string;
+}): Promise<{ mediaId: string }> {
+  const formData = new FormData();
+  formData.set("messaging_product", "whatsapp");
+  formData.set("file", new Blob([new Uint8Array(params.buffer)], { type: params.mimeType }));
+
+  const data = await graphFetch<{ id: string }>(`/${params.phoneNumberId}/media`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${params.accessToken}` },
+    body: formData,
+  });
+  return { mediaId: data.id };
+}
+
+export async function sendWhatsAppImageMessage(params: {
+  phoneNumberId: string;
+  accessToken: string;
+  to: string;
+  mediaId: string;
+  caption?: string;
+}): Promise<{ messageId: string }> {
+  const data = await graphFetch<{ messages: Array<{ id: string }> }>(`/${params.phoneNumberId}/messages`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${params.accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      messaging_product: "whatsapp",
+      to: params.to,
+      type: "image",
+      image: { id: params.mediaId, caption: params.caption },
+    }),
+  });
+  return { messageId: data.messages[0].id };
+}
+
 export function generateTwoStepPin(): string {
   const value = Math.floor(Math.random() * 1_000_000);
   return value.toString().padStart(6, "0");

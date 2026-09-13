@@ -41,6 +41,7 @@ services:
         NEXT_PUBLIC_GOOGLE_MAPS_API_KEY: ${NEXT_PUBLIC_GOOGLE_MAPS_API_KEY:-}
         NEXT_PUBLIC_META_APP_ID: ${NEXT_PUBLIC_META_APP_ID:-}
         NEXT_PUBLIC_META_WHATSAPP_CONFIG_ID: ${NEXT_PUBLIC_META_WHATSAPP_CONFIG_ID:-}
+    image: whatsapp-orders-app:latest
     restart: unless-stopped
     env_file:
       - .env
@@ -58,6 +59,27 @@ services:
       redis:
         condition: service_healthy
     command: sh -c "npx prisma migrate deploy && node server.js"
+
+  # Proceso de BullMQ (Fase 3: recordatorio/cancelación de comprobante,
+  # vencimiento de conversación). Misma imagen que "app" — corre el código
+  # fuente vía tsx en lugar del build "standalone" (ver Dockerfile).
+  worker:
+    image: whatsapp-orders-app:latest
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-whatsapp_orders}:${POSTGRES_PASSWORD:-whatsapp_orders}@postgres:5432/${POSTGRES_DB:-whatsapp_orders}
+      REDIS_URL: redis://redis:6379
+      UPLOADS_DIR: /app/uploads
+    volumes:
+      - uploads_data:/app/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: npx tsx src/worker/index.ts
 
 volumes:
   postgres_data:

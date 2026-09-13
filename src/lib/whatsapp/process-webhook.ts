@@ -2,6 +2,8 @@ import { prisma } from "@/lib/prisma";
 import { decryptSecret } from "@/lib/crypto";
 import { downloadWhatsAppMedia } from "@/lib/whatsapp/graph-api";
 import { isSupportedUploadMimeType, saveUploadedFile } from "@/lib/uploads";
+import { transcribeAudio } from "@/lib/ai/transcribe-audio";
+import { processInboundMessage } from "@/lib/orders/engine";
 import type { MessageType } from "@prisma/client";
 
 type InboundMessage = {
@@ -85,12 +87,20 @@ async function processMessagesChange(value: WebhookChangeValue): Promise<void> {
       await prisma.conversation.update({ where: { id: conversation.id }, data: { status: "ACTIVE" } });
     }
 
-    const messageType = MESSAGE_TYPE_BY_WHATSAPP_TYPE[message.type] ?? "SYSTEM";
-    const mediaUrl = await downloadMediaIfPresent(message, accessToken);
+    const alreadyProcessed = await prisma.message.findUnique({ where: { whatsappMessageId: message.id } });
+    if (alreadyProcessed) continue;
 
-    await prisma.message.upsert({
-      where: { whatsappMessageId: message.id },
-      create: {
+    const messageType = MESSAGE_TYPE_BY_WHATSAPP_TYPE[message.type] ?? "SYSTEM";
+    const { mediaUrl, transcription } = await downloadMediaIfPresent({
+      message,
+      accessToken,
+      companyId: line.companyId,
+      branchId: line.branchId,
+      conversationId: conversation.id,
+    });
+
+    const createdMessage = await prisma.message.create({
+      data: {
         companyId: line.companyId,
         branchId: line.branchId,
         conversationId: conversation.id,
@@ -98,24 +108,49 @@ async function processMessagesChange(value: WebhookChangeValue): Promise<void> {
         messageType,
         textContent: message.text?.body ?? message.image?.caption ?? null,
         mediaUrl,
+        transcription,
         whatsappMessageId: message.id,
         rawPayload: message as object,
       },
-      update: {},
     });
+
+    await processInboundMessage({ conversationId: conversation.id, messageId: createdMessage.id });
   }
 }
 
-async function downloadMediaIfPresent(message: InboundMessage, accessToken: string | null): Promise<string | null> {
-  const mediaRef = message.image ?? message.audio ?? message.document;
-  if (!mediaRef || !accessToken) return null;
-  if (!isSupportedUploadMimeType(mediaRef.mime_type)) return null;
+async function downloadMediaIfPresent(params: {
+  message: InboundMessage;
+  accessToken: string | null;
+  companyId: string;
+  branchId: string;
+  conversationId: string;
+}): Promise<{ mediaUrl: string | null; transcription: string | null }> {
+  const mediaRef = params.message.image ?? params.message.audio ?? params.message.document;
+  if (!mediaRef || !params.accessToken) return { mediaUrl: null, transcription: null };
+  if (!isSupportedUploadMimeType(mediaRef.mime_type)) return { mediaUrl: null, transcription: null };
 
   try {
-    const { buffer, mimeType } = await downloadWhatsAppMedia(mediaRef.id, accessToken);
-    return await saveUploadedFile({ subdir: "whatsapp", buffer, mimeType });
+    const { buffer, mimeType } = await downloadWhatsAppMedia(mediaRef.id, params.accessToken);
+    const mediaUrl = await saveUploadedFile({ subdir: "whatsapp", buffer, mimeType });
+
+    let transcription: string | null = null;
+    if (params.message.type === "audio") {
+      try {
+        transcription = await transcribeAudio({
+          buffer,
+          mimeType,
+          companyId: params.companyId,
+          branchId: params.branchId,
+          conversationId: params.conversationId,
+        });
+      } catch (error) {
+        console.error("Error transcribiendo audio de WhatsApp:", error);
+      }
+    }
+
+    return { mediaUrl, transcription };
   } catch (error) {
     console.error("Error descargando archivo multimedia de WhatsApp:", error);
-    return null;
+    return { mediaUrl: null, transcription: null };
   }
 }
