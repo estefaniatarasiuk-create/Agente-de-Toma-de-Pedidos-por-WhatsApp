@@ -41,6 +41,10 @@ COPY --from=builder /app/prisma.config.ts ./prisma.config.ts
 # Next, que solo empaqueta lo que usan las rutas HTTP).
 COPY --from=builder --chown=nextjs:nodejs /app/src ./src
 COPY --from=builder /app/tsconfig.json ./tsconfig.json
+# Scripts de desarrollo/diagnóstico (ej. simular un webhook entrante de
+# WhatsApp para probar el motor de pedidos sin depender de que Meta entregue
+# tráfico real a una app todavía no publicada).
+COPY --from=builder --chown=nextjs:nodejs /app/scripts ./scripts
 
 # Punto de montaje del volumen de archivos subidos (fotos de catálogo,
 # comprobantes): se crea con el dueño correcto para que el proceso
