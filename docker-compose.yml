@@ -33,14 +33,23 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        # Next.js "inlinea" las variables NEXT_PUBLIC_* en el bundle del
+        # cliente durante el build, no en runtime: por eso viajan como build
+        # arg (Compose las toma del .env de la raíz) y no alcanza con
+        # declararlas en `environment`.
+        NEXT_PUBLIC_GOOGLE_MAPS_API_KEY: ${NEXT_PUBLIC_GOOGLE_MAPS_API_KEY:-}
     restart: unless-stopped
     env_file:
       - .env
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-whatsapp_orders}:${POSTGRES_PASSWORD:-whatsapp_orders}@postgres:5432/${POSTGRES_DB:-whatsapp_orders}
       REDIS_URL: redis://redis:6379
+      UPLOADS_DIR: /app/uploads
     ports:
       - "3000:3000"
+    volumes:
+      - uploads_data:/app/uploads
     depends_on:
       postgres:
         condition: service_healthy
@@ -51,3 +60,4 @@ services:
 volumes:
   postgres_data:
   redis_data:
+  uploads_data:

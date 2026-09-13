@@ -9,6 +9,9 @@ COPY prisma ./prisma
 RUN npm ci --legacy-peer-deps
 
 FROM base AS builder
+# Se "hornea" en el bundle del cliente en build time, no en runtime.
+ARG NEXT_PUBLIC_GOOGLE_MAPS_API_KEY
+ENV NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=$NEXT_PUBLIC_GOOGLE_MAPS_API_KEY
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN npx prisma generate
@@ -29,6 +32,11 @@ COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 COPY --from=builder /app/prisma ./prisma
 COPY --from=builder /app/prisma.config.ts ./prisma.config.ts
+
+# Punto de montaje del volumen de archivos subidos (fotos de catálogo,
+# comprobantes): se crea con el dueño correcto para que el proceso
+# (corriendo como "nextjs") pueda escribir ahí.
+RUN mkdir -p /app/uploads && chown nextjs:nodejs /app/uploads
 
 USER nextjs
 EXPOSE 3000

@@ -1,0 +1,2 @@
+-- AlterEnum
+ALTER TYPE "AIUsagePurpose" ADD VALUE 'CONTRADICTION_CHECK';

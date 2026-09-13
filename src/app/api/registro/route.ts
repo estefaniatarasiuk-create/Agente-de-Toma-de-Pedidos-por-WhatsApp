@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/prisma";
-import { registerSchema } from "@/lib/validation";
+import { registerSchema } from "@/lib/validations/auth";
 
 const PASSWORD_HASH_ROUNDS = 12;
 

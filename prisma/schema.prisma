@@ -158,7 +158,9 @@ model Product {
 
 enum CatalogImageSource {
   UPLOADED
-  AI_GENERATED
+  // Renderizada por el sistema a partir del catálogo estructurado vigente
+  // (no es una imagen generada por un modelo de IA: los precios son reales).
+  GENERATED
 }
 
 model CatalogImage {
@@ -530,6 +532,7 @@ enum AIUsagePurpose {
   ZONE_PARSING
   AUDIO_TRANSCRIPTION
   TEST_CONVERSATION
+  CONTRADICTION_CHECK
 }
 
 model AIUsageLog {

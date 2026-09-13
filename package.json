@@ -12,14 +12,18 @@
     "db:studio": "prisma studio"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.125.0",
     "@prisma/adapter-pg": "^7.10.0",
     "@prisma/client": "^7.10.0",
+    "@react-google-maps/api": "^2.20.8",
     "bcryptjs": "^3.0.3",
     "next": "16.3.5",
     "next-auth": "^5.0.0-beta.32",
+    "openai": "^7.15.0",
     "pg": "^8.23.0",
     "react": "19.2.8",
     "react-dom": "19.2.8",
+    "xlsx": "^0.18.5",
     "zod": "^4.6.4"
   },
   "devDependencies": {
