@@ -1,0 +1,558 @@
+// Schema completo de la plataforma (Fase 0).
+// Multi-tenant desde el día 1: toda tabla de negocio lleva companyId y branchId,
+// aunque el producto opera con una sola sucursal por cuenta (sin UI multi-sucursal).
+// Los montos de dinero se guardan en centavos (Int) para evitar errores de float.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ---------------------------------------------------------------------------
+// Cuenta / usuarios / sucursal
+// ---------------------------------------------------------------------------
+
+model Company {
+  id        String   @id @default(cuid())
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users    User[]
+  branches Branch[]
+
+  @@map("companies")
+}
+
+enum UserRole {
+  ADMIN
+}
+
+model User {
+  id           String   @id @default(cuid())
+  companyId    String
+  email        String   @unique
+  passwordHash String
+  name         String
+  role         UserRole @default(ADMIN)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  company                  Company            @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  paymentValidations       Order[]            @relation("PaymentValidatedByUser")
+  orderStatusEventsChanged OrderStatusEvent[]
+  sentMessages             Message[]
+
+  @@index([companyId])
+  @@map("users")
+}
+
+model Branch {
+  id        String  @id @default(cuid())
+  companyId String
+  name      String
+  address   String?
+  latitude  Float?
+  longitude Float?
+  timezone  String  @default("America/Argentina/Buenos_Aires")
+
+  // "Demora actual" (US5.6): minutos que se informan como demora vigente.
+  currentDelayMinutes Int @default(40)
+
+  // Circuito del comprobante (spec §3.4 + decisión de arquitectura explícita):
+  // defaults 45 min recordatorio / 60 min cancelación, configurables por sucursal.
+  receiptReminderMinutes Int @default(45)
+  receiptCancelMinutes   Int @default(60)
+
+  // Tiempo de inactividad del cliente antes de expirar la conversación (§3.3).
+  conversationExpiryMinutes Int @default(30)
+
+  // Última entrada en lenguaje natural usada para generar horarios (auditoría / re-edición).
+  businessHoursSourceText String? @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  company           Company              @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  whatsappLine      WhatsAppLine?
+  products          Product[]
+  catalogImage      CatalogImage?
+  businessHourSlots BusinessHourSlot[]
+  deliveryZone      DeliveryZone?
+  paymentMethod     PaymentMethodConfig?
+  aiConfig          AIConfig?
+  conversations     Conversation[]
+  orders            Order[]
+  aiUsageLogs       AIUsageLog[]
+  webhookEvents     WebhookEvent[]
+
+  @@index([companyId])
+  @@map("branches")
+}
+
+// ---------------------------------------------------------------------------
+// E1 — Línea de WhatsApp
+// ---------------------------------------------------------------------------
+
+enum WhatsAppLineStatus {
+  PENDING
+  ACTIVE
+  ERROR
+}
+
+model WhatsAppLine {
+  id        String @id @default(cuid())
+  companyId String
+  branchId  String @unique
+
+  status               WhatsAppLineStatus @default(PENDING)
+  phoneNumberId        String?
+  wabaId               String?
+  businessAccountId    String?
+  displayPhoneNumber   String?
+  verifiedName         String?
+  // Access token de la línea, cifrado en reposo (ver lib/crypto).
+  accessTokenEncrypted String?
+  tokenExpiresAt       DateTime?
+  lastErrorMessage     String?
+  connectedAt          DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  branch Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  @@index([companyId])
+  @@map("whatsapp_lines")
+}
+
+// ---------------------------------------------------------------------------
+// E2 — Catálogo de productos
+// ---------------------------------------------------------------------------
+
+model Product {
+  id          String  @id @default(cuid())
+  companyId   String
+  branchId    String
+  name        String
+  description String? @db.Text
+  priceCents  Int
+  category    String?
+  imageUrl    String?
+  isActive    Boolean @default(true)
+  sortOrder   Int     @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  branch     Branch      @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  orderItems OrderItem[]
+
+  @@index([companyId])
+  @@index([branchId, isActive])
+  @@map("products")
+}
+
+enum CatalogImageSource {
+  UPLOADED
+  AI_GENERATED
+}
+
+model CatalogImage {
+  id          String             @id @default(cuid())
+  companyId   String
+  branchId    String             @unique
+  imageUrl    String
+  source      CatalogImageSource
+  generatedAt DateTime           @default(now())
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+
+  branch Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  @@index([companyId])
+  @@map("catalog_images")
+}
+
+// ---------------------------------------------------------------------------
+// E3 — Franjas horarias
+// ---------------------------------------------------------------------------
+
+model BusinessHourSlot {
+  id          String  @id @default(cuid())
+  companyId   String
+  branchId    String
+  // 0 = domingo ... 6 = sábado (convención JS Date#getDay()).
+  dayOfWeek   Int
+  startMinute Int
+  endMinute   Int
+  isActive    Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  branch Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  @@index([companyId])
+  @@index([branchId, dayOfWeek])
+  @@map("business_hour_slots")
+}
+
+// ---------------------------------------------------------------------------
+// E9 — Zona de entrega + cache de geocodificación
+// ---------------------------------------------------------------------------
+
+model DeliveryZone {
+  id                      String  @id @default(cuid())
+  companyId               String
+  branchId                String  @unique
+  centerLatitude          Float
+  centerLongitude         Float
+  radiusKm                Float
+  rawNaturalLanguageInput String? @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  branch Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  @@index([companyId])
+  @@map("delivery_zones")
+}
+
+// Base propia de direcciones ya validadas (cache de geocodificación, spec §3.5).
+// Es global (no por sucursal): una misma dirección geocodificada sirve para
+// cualquier sucursal que la consulte, la zona se valida aparte por distancia.
+model AddressCache {
+  id                String   @id @default(cuid())
+  normalizedAddress String   @unique
+  rawAddress        String
+  formattedAddress  String?
+  latitude          Float
+  longitude         Float
+  provider          String   @default("google")
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@map("address_cache")
+}
+
+// ---------------------------------------------------------------------------
+// E11 — Medios de pago
+// ---------------------------------------------------------------------------
+
+model PaymentMethodConfig {
+  id              String  @id @default(cuid())
+  companyId       String
+  branchId        String  @unique
+  cashEnabled     Boolean @default(true)
+  transferEnabled Boolean @default(false)
+  transferAlias   String?
+  transferCbu     String?
+  transferHolder  String?
+  transferCuit    String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  branch Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  @@index([companyId])
+  @@map("payment_method_configs")
+}
+
+// ---------------------------------------------------------------------------
+// E10 — Configuración de IA
+// ---------------------------------------------------------------------------
+
+enum AITone {
+  FORMAL
+  CERCANO
+}
+
+model AIConfig {
+  id                     String  @id @default(cuid())
+  companyId              String
+  branchId               String  @unique
+  tone                   AITone  @default(CERCANO)
+  useEmojis              Boolean @default(true)
+  additionalInstructions String? @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  branch Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  @@index([companyId])
+  @@map("ai_configs")
+}
+
+// ---------------------------------------------------------------------------
+// E4 / E7 — Conversaciones y mensajes
+// ---------------------------------------------------------------------------
+
+enum ConversationStatus {
+  ACTIVE
+  REQUIRES_ATTENTION
+  AI_PAUSED
+  CLOSED
+}
+
+model Conversation {
+  id            String             @id @default(cuid())
+  companyId     String
+  branchId      String
+  customerPhone String
+  customerName  String?
+  status        ConversationStatus @default(ACTIVE)
+  // Paso vigente de la máquina de estados del pedido en curso (spec §3.2).
+  currentStep   String?
+  lastMessageAt DateTime           @default(now())
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  branch   Branch    @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  messages Message[]
+  orders   Order[]
+
+  @@unique([branchId, customerPhone])
+  @@index([companyId])
+  @@index([branchId, status])
+  @@map("conversations")
+}
+
+enum MessageDirection {
+  INBOUND
+  OUTBOUND
+}
+
+enum MessageType {
+  TEXT
+  IMAGE
+  AUDIO
+  DOCUMENT
+  LOCATION
+  INTERACTIVE
+  SYSTEM
+}
+
+model Message {
+  id                String           @id @default(cuid())
+  companyId         String
+  branchId          String
+  conversationId    String
+  direction         MessageDirection
+  messageType       MessageType
+  textContent       String?          @db.Text
+  mediaUrl          String?
+  // Transcripción de audio (regla obligatoria: todo audio entra al flujo como texto).
+  transcription     String?          @db.Text
+  // Id de mensaje de WhatsApp; único para deduplicar reintentos de Meta.
+  whatsappMessageId String?          @unique
+  rawPayload        Json?
+  // Si un operador humano envió el mensaje desde la bandeja en vivo.
+  sentByUserId      String?
+  processedAt       DateTime?
+
+  createdAt DateTime @default(now())
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sentByUser   User?        @relation(fields: [sentByUserId], references: [id])
+
+  @@index([companyId])
+  @@index([conversationId, createdAt])
+  @@map("messages")
+}
+
+// Todo webhook entrante de Meta se persiste antes de procesarse (idempotencia).
+enum WebhookEventStatus {
+  RECEIVED
+  PROCESSED
+  FAILED
+}
+
+model WebhookEvent {
+  id           String             @id @default(cuid())
+  branchId     String?
+  provider     String             @default("meta")
+  externalId   String             @unique
+  payload      Json
+  status       WebhookEventStatus @default(RECEIVED)
+  errorMessage String?
+  receivedAt   DateTime           @default(now())
+  processedAt  DateTime?
+
+  branch Branch? @relation(fields: [branchId], references: [id], onDelete: SetNull)
+
+  @@index([branchId])
+  @@map("webhook_events")
+}
+
+// ---------------------------------------------------------------------------
+// E5 / E6 — Pedidos
+// ---------------------------------------------------------------------------
+
+enum OrderStatus {
+  WAITING_RECEIPT
+  PENDING
+  PREPARING
+  ON_THE_WAY
+  DELIVERED
+  CANCELLED
+}
+
+enum PaymentMethod {
+  CASH
+  TRANSFER
+}
+
+enum CancelledBy {
+  CUSTOMER
+  COMPANY
+  SYSTEM
+}
+
+model Order {
+  id             String  @id @default(cuid())
+  companyId      String
+  branchId       String
+  conversationId String?
+
+  customerPhone String
+  customerName  String
+
+  deliveryAddressRaw        String
+  deliveryAddressNormalized String?
+  deliveryLatitude          Float?
+  deliveryLongitude         Float?
+  deliveryNotes             String? @db.Text
+
+  status OrderStatus @default(PENDING)
+
+  paymentMethod          PaymentMethod
+  cashPaymentAmountCents Int?
+  changeAmountCents      Int?
+
+  subtotalCents Int
+  totalCents    Int
+
+  // Demora vigente de la sucursal al momento del pedido, y hora estimada resultante (§3.6).
+  delayMinutesAtOrder Int
+  estimatedDeliveryAt DateTime
+
+  deliveredAt        DateTime?
+  cancelledAt        DateTime?
+  cancellationReason String?
+  cancelledBy        CancelledBy?
+
+  receiptUrl               String?
+  receiptReceivedAt        DateTime?
+  paymentValidated         Boolean   @default(false)
+  paymentValidatedAt       DateTime?
+  paymentValidatedByUserId String?
+
+  // Bandera "demorado" (US5.7): hora estimada vencida sin pasar a "En camino".
+  isDelayed Boolean @default(false)
+
+  // Trazabilidad IA vs. humano (objetivo de negocio §4.3 / E7).
+  resolvedByAI              Boolean @default(true)
+  requiredHumanIntervention Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  branch                 Branch             @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  conversation           Conversation?      @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+  paymentValidatedByUser User?              @relation("PaymentValidatedByUser", fields: [paymentValidatedByUserId], references: [id])
+  items                  OrderItem[]
+  statusEvents           OrderStatusEvent[]
+  aiUsageLogs            AIUsageLog[]
+
+  @@index([companyId])
+  @@index([branchId, status])
+  @@index([branchId, createdAt])
+  @@map("orders")
+}
+
+model OrderItem {
+  id             String  @id @default(cuid())
+  companyId      String
+  branchId       String
+  orderId        String
+  productId      String?
+  // Snapshot del producto al momento del pedido (el catálogo puede cambiar después).
+  productName    String
+  unitPriceCents Int
+  quantity       Int
+  subtotalCents  Int
+
+  order   Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
+
+  @@index([companyId])
+  @@index([orderId])
+  @@map("order_items")
+}
+
+model OrderStatusEvent {
+  id              String       @id @default(cuid())
+  companyId       String
+  branchId        String
+  orderId         String
+  fromStatus      OrderStatus?
+  toStatus        OrderStatus
+  changedByUserId String?
+  changedByAI     Boolean      @default(false)
+  reason          String?
+  createdAt       DateTime     @default(now())
+
+  order         Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  changedByUser User? @relation(fields: [changedByUserId], references: [id])
+
+  @@index([companyId])
+  @@index([orderId, createdAt])
+  @@map("order_status_events")
+}
+
+// ---------------------------------------------------------------------------
+// E11-config / métricas — Log de uso de IA (tokens y costo por pedido)
+// ---------------------------------------------------------------------------
+
+enum AIUsagePurpose {
+  ORDER_CONVERSATION
+  CATALOG_IMPORT
+  CATALOG_IMAGE_GENERATION
+  HOURS_PARSING
+  ZONE_PARSING
+  AUDIO_TRANSCRIPTION
+  TEST_CONVERSATION
+}
+
+model AIUsageLog {
+  id               String         @id @default(cuid())
+  companyId        String
+  branchId         String
+  orderId          String?
+  conversationId   String?
+  purpose          AIUsagePurpose
+  provider         String
+  model            String
+  promptTokens     Int            @default(0)
+  completionTokens Int            @default(0)
+  totalTokens      Int            @default(0)
+  costUsd          Decimal        @default(0) @db.Decimal(10, 6)
+
+  createdAt DateTime @default(now())
+
+  branch Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  order  Order? @relation(fields: [orderId], references: [id], onDelete: SetNull)
+
+  @@index([companyId])
+  @@index([branchId, createdAt])
+  @@index([orderId])
+  @@map("ai_usage_logs")
+}
