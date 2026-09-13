@@ -49,6 +49,13 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-whatsapp_orders}:${POSTGRES_PASSWORD:-whatsapp_orders}@postgres:5432/${POSTGRES_DB:-whatsapp_orders}
       REDIS_URL: redis://redis:6379
       UPLOADS_DIR: /app/uploads
+      # Docker define HOSTNAME automáticamente como el id del contenedor; el
+      # server standalone de Next lo usa como dirección para escuchar si no
+      # se lo pisa, y termina bindeado solo a la IP interna del contenedor
+      # en vez de a todas las interfaces. Sin esto, `docker compose exec app
+      # curl localhost:3000` (o el script de Fase 3 que simula un webhook)
+      # da ECONNREFUSED aunque desde afuera del contenedor funcione bien.
+      HOSTNAME: "0.0.0.0"
     ports:
       - "3000:3000"
     volumes:
