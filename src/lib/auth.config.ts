@@ -4,6 +4,9 @@ import type { NextAuthConfig } from "next-auth";
 // bcrypt) para poder usarse también en el middleware. La validación real de
 // email/contraseña vive en auth.ts, que extiende esta config.
 export const authConfig: NextAuthConfig = {
+  // Self-hosteado (docker-compose), no en Vercel: Auth.js necesita esto
+  // explícito para confiar en el header Host y no tirar "UntrustedHost".
+  trustHost: true,
   session: { strategy: "jwt" },
   pages: {
     signIn: "/login",
