@@ -127,9 +127,9 @@ ${RESPONSE_FORMAT_INSTRUCTIONS}
 
 Estado actual del pedido en construcción (validado por el sistema, podés citarlo tal cual):
 ${draftSummary}
-${params.draft.customerName ? `Nombre del cliente: ${params.draft.customerName}` : ""}
-${params.draft.deliveryAddressRaw ? `Domicilio: ${params.draft.deliveryAddressRaw}${params.draft.deliveryAddressNotes ? ` (${params.draft.deliveryAddressNotes})` : ""}` : ""}
-${params.draft.paymentMethod ? `Medio de pago elegido: ${params.draft.paymentMethod === "CASH" ? "efectivo" : "transferencia"}` : ""}
+Nombre del cliente: ${params.draft.customerName ? params.draft.customerName : "TODAVÍA NO LO DIJO — no armes un resumen ni pidas confirmar hasta tenerlo"}
+Domicilio de entrega: ${params.draft.deliveryAddressRaw ? `${params.draft.deliveryAddressRaw}${params.draft.deliveryAddressNotes ? ` (${params.draft.deliveryAddressNotes})` : ""}` : "TODAVÍA NO LO DIJO — no armes un resumen ni pidas confirmar hasta tenerlo"}
+Medio de pago: ${params.draft.paymentMethod ? (params.draft.paymentMethod === "CASH" ? "efectivo" : "transferencia") : "TODAVÍA NO LO ELIGIÓ — no armes un resumen ni pidas confirmar hasta tenerlo"}
 ${activeOrderText ? `\nEste cliente ya tiene un pedido en curso (independiente del que se esté armando arriba): ${activeOrderText}` : ""}`;
 
   return { branchName, system };
