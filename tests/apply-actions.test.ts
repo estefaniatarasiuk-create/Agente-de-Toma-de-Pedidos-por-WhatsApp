@@ -209,3 +209,68 @@ describe("applyActions — add_item fija el total, no lo suma, y protege la conf
     expect(orders[0].totalCents).toBe(3000000);
   });
 });
+
+// Pedido del usuario: "asegurar que si un pedido ya fue marcado como
+// enviado o entregado, no se sume a un próximo pedido que se haga". El
+// borrador se limpia al CONFIRMAR (no al entregar), así que un pedido
+// nuevo nunca puede heredar ítems de uno anterior, sea cual sea su estado.
+describe("applyActions — un pedido nuevo nunca hereda ítems de uno previo ya entregado", () => {
+  const companiesToCleanup: string[] = [];
+
+  afterAll(async () => {
+    for (const companyId of companiesToCleanup) await cleanupCompany(companyId);
+  });
+
+  it("el borrador que devuelve confirm_order queda vacío, y sigue vacío aunque el pedido anterior ya se haya entregado", async () => {
+    const { company, branch } = await createTestCompanyAndBranch();
+    companiesToCleanup.push(company.id);
+
+    const product = await prisma.product.create({
+      data: { companyId: company.id, branchId: branch.id, name: "Chipa", priceCents: 300000 },
+    });
+    await prisma.paymentMethodConfig.create({
+      data: { companyId: company.id, branchId: branch.id, cashEnabled: true, transferEnabled: false },
+    });
+    const conversation = await prisma.conversation.create({
+      data: { companyId: company.id, branchId: branch.id, customerPhone: "5491100000004" },
+    });
+
+    const firstDraft = {
+      items: [{ productId: product.id, productName: product.name, unitPriceCents: product.priceCents, quantity: 10 }],
+      customerName: "Cliente Test",
+      deliveryAddressRaw: "Calle Falsa 123",
+      deliveryLatitude: -34.6,
+      deliveryLongitude: -58.38,
+      paymentMethod: "CASH" as const,
+    };
+
+    const firstResult = await applyActions({
+      companyId: company.id,
+      branchId: branch.id,
+      conversationId: conversation.id,
+      customerPhone: "5491100000004",
+      draft: firstDraft,
+      actions: [{ type: "confirm_order" }],
+    });
+    expect(firstResult.orderCreated).toBe(true);
+    expect(firstResult.draft.items).toEqual([]);
+
+    // El primer pedido se marca como entregado (como haría el tablero de la Fase 4).
+    const firstOrder = await prisma.order.findFirstOrThrow({ where: { branchId: branch.id } });
+    await prisma.order.update({ where: { id: firstOrder.id }, data: { status: "DELIVERED", deliveredAt: new Date() } });
+
+    // El cliente arma un pedido nuevo, arrancando del borrador que quedó (vacío) tras confirmar el primero.
+    const secondResult = await applyActions({
+      companyId: company.id,
+      branchId: branch.id,
+      conversationId: conversation.id,
+      customerPhone: "5491100000004",
+      draft: firstResult.draft,
+      actions: [{ type: "add_item", productName: "Chipa", quantity: 2 }],
+    });
+
+    expect(secondResult.draft.items).toEqual([
+      { productId: product.id, productName: product.name, unitPriceCents: product.priceCents, quantity: 2 },
+    ]);
+  });
+});

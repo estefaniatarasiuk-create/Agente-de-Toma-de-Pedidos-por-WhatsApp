@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useOperationsAlerts } from "@/components/operations-alerts-provider";
 
 const NAV_ITEMS = [
   { href: "/", label: "Inicio" },
@@ -18,25 +19,44 @@ const NAV_ITEMS = [
 
 export function DashboardNav() {
   const pathname = usePathname();
+  const { requiresAttentionCount, notificationsEnabled, notificationsSupported, requestNotificationPermission } =
+    useOperationsAlerts();
 
   return (
-    <nav className="flex flex-1 flex-col gap-1 overflow-y-auto p-3">
-      {NAV_ITEMS.map((item) => {
-        const isActive = item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
-        return (
-          <Link
-            key={item.href}
-            href={item.href}
-            className={`rounded-md px-3 py-2 text-sm font-medium transition-colors ${
-              isActive
-                ? "bg-green-50 text-green-700"
-                : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
-            }`}
+    <div className="flex flex-1 flex-col overflow-y-auto">
+      <nav className="flex flex-col gap-1 p-3">
+        {NAV_ITEMS.map((item) => {
+          const isActive = item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
+          return (
+            <Link
+              key={item.href}
+              href={item.href}
+              className={`flex items-center justify-between rounded-md px-3 py-2 text-sm font-medium transition-colors ${
+                isActive ? "bg-green-50 text-green-700" : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+              }`}
+            >
+              <span>{item.label}</span>
+              {item.href === "/conversaciones" && requiresAttentionCount > 0 && (
+                <span className="rounded-full bg-red-600 px-2 py-0.5 text-xs font-semibold text-white">
+                  {requiresAttentionCount}
+                </span>
+              )}
+            </Link>
+          );
+        })}
+      </nav>
+
+      {notificationsSupported && !notificationsEnabled && (
+        <div className="mx-3 mt-2 rounded-md border border-gray-200 bg-gray-50 p-3 text-xs text-gray-600">
+          <p>Activá las notificaciones para enterarte al instante de nuevos pedidos y chats que necesitan atención.</p>
+          <button
+            onClick={requestNotificationPermission}
+            className="mt-2 rounded-md bg-green-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-green-700"
           >
-            {item.label}
-          </Link>
-        );
-      })}
-    </nav>
+            Activar notificaciones
+          </button>
+        </div>
+      )}
+    </div>
   );
 }

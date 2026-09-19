@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { Order, OrderItem, OrderStatus } from "@prisma/client";
 import { formatCentsAsArs } from "@/lib/money";
 import { OrderDetailPanel } from "./order-detail-panel";
@@ -16,6 +16,8 @@ const COLUMNS: { status: OrderStatus; label: string }[] = [
   { status: "CANCELLED", label: "Cancelado" },
 ];
 
+const POLL_INTERVAL_MS = 8000;
+
 export function OrdersBoard({ initialOrders }: { initialOrders: OrderWithItems[] }) {
   const [orders, setOrders] = useState(initialOrders);
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
@@ -25,6 +27,13 @@ export function OrdersBoard({ initialOrders }: { initialOrders: OrderWithItems[]
     const data = await response.json();
     setOrders(data.orders);
   }
+
+  // Actualización en vivo del tablero: sin esto, un pedido nuevo o un
+  // cambio de estado solo se veía al recargar la página a mano.
+  useEffect(() => {
+    const interval = setInterval(refreshOrders, POLL_INTERVAL_MS);
+    return () => clearInterval(interval);
+  }, []);
 
   return (
     <div className="flex h-screen flex-col p-8">

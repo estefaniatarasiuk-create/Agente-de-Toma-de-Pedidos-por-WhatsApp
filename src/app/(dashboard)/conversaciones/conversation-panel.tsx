@@ -13,6 +13,8 @@ const STATUS_BADGE: Record<ConversationStatus, { label: string; className: strin
   CLOSED: { label: "Cerrada", className: "bg-gray-100 text-gray-500" },
 };
 
+const CHAT_POLL_INTERVAL_MS = 4000;
+
 function messageLabel(message: MessageWithSender): string {
   if (message.textContent) return message.textContent;
   if (message.transcription) return `🎤 ${message.transcription}`;
@@ -37,6 +39,14 @@ export function ConversationPanel({ conversationId, onChanged }: { conversationI
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- carga inicial por id, no hay forma de evitar el setState acá
     load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [conversationId]);
+
+  // Sondeo del chat abierto: si el cliente escribe mientras estás mirando
+  // esta conversación, tiene que aparecer solo, sin recargar la página.
+  useEffect(() => {
+    const interval = setInterval(load, CHAT_POLL_INTERVAL_MS);
+    return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conversationId]);
 

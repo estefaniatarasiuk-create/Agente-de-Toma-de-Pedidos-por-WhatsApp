@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { Conversation, ConversationStatus, Message } from "@prisma/client";
 import { ConversationPanel } from "./conversation-panel";
 
@@ -13,6 +13,8 @@ const STATUS_BADGE: Record<ConversationStatus, { label: string; className: strin
   CLOSED: { label: "Cerrada", className: "bg-gray-100 text-gray-500" },
 };
 
+const POLL_INTERVAL_MS = 8000;
+
 export function ConversationsInbox({ initialConversations }: { initialConversations: ConversationWithPreview[] }) {
   const [conversations, setConversations] = useState(initialConversations);
   const [selectedId, setSelectedId] = useState<string | null>(initialConversations[0]?.id ?? null);
@@ -22,6 +24,13 @@ export function ConversationsInbox({ initialConversations }: { initialConversati
     const data = await response.json();
     setConversations(data.conversations);
   }
+
+  // Actualización en vivo de la lista (previews y estados), no solo del
+  // chat abierto — para ver llegar una conversación nueva sin recargar.
+  useEffect(() => {
+    const interval = setInterval(refresh, POLL_INTERVAL_MS);
+    return () => clearInterval(interval);
+  }, []);
 
   // Las que necesitan atención van primero, después el resto por actividad reciente.
   const sorted = [...conversations].sort((a, b) => {

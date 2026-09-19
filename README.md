@@ -302,6 +302,21 @@ completo a la derecha.
    cuenta — es una decisión aparte, para no perder el control accidental
    por escribir una vez.
 
+**Notificaciones y actualización en vivo** (ajuste agregado después de probar
+la Fase 4): con el panel abierto, hacé clic en "Activar notificaciones" en
+la barra lateral (el navegador va a pedir el permiso). A partir de ahí:
+
+1. El número junto a "Conversaciones" en el menú muestra cuántas necesitan
+   atención humana en este momento, en vivo.
+2. Cuando una conversación pasa a necesitar atención, o llega un pedido
+   nuevo, suena un beep corto y aparece una notificación del navegador —
+   sin bloquear nada de lo que estés haciendo en el panel. Solo avisa de
+   lo que aparece **después** de abrir el panel, no de lo que ya estaba
+   ahí (para no repetir alertas viejas cada vez que recargás la página).
+3. El tablero de pedidos, la lista de conversaciones y el chat abierto se
+   actualizan solos cada pocos segundos (sondeo periódico) — no hace falta
+   recargar la página para ver un mensaje o pedido nuevo.
+
 ## Pendientes de pulido (para el cierre, Fase 5)
 
 Detectados probando la Fase 1, decidimos no resolverlos todavía porque no
@@ -493,6 +508,17 @@ bloquean funcionalidad — quedan anotados para no perderlos:
   WhatsApp cuando pasa a "en camino" o "entregado" (y al validarle el pago
   o cancelarle el pedido) — no en cada paso interno (ej. pasar a
   "en preparación" no genera un mensaje, es información de uso interno).
+- **Actualización del panel por sondeo (polling), no WebSockets.** El panel
+  se refresca solo cada pocos segundos (`/api/notificaciones` liviano cada
+  8s para las alertas, el tablero y la lista de conversaciones cada 8s, el
+  chat abierto cada 4s) en vez de una conexión en tiempo real. Para el
+  volumen de uso de un solo local (un puñado de operadores viendo el panel
+  a la vez) es una diferencia de segundos, no de experiencia — y evita
+  meter infraestructura nueva (un server de WebSockets, o Redis pub/sub
+  atado al ciclo de vida de cada conexión) para un panel de administración
+  interno. El beep se genera con Web Audio API (sin archivo de audio que
+  versionar) y las notificaciones usan la Notification API del navegador,
+  ambas nativas, sin dependencias nuevas.
 
 ## Estructura del repo
 
@@ -515,7 +541,9 @@ src/lib/                    Prisma client, auth, helpers
 src/app/(auth)/              Login y registro
 src/app/(dashboard)/         Panel autenticado (layout + una carpeta por sección/épica);
                              pedidos/ y conversaciones/ son el tablero y la bandeja en vivo (Fase 4)
-src/app/api/                 Rutas de API (auth, registro, catálogo, horarios, zona, pagos, IA, WhatsApp, uploads)
+src/app/api/                 Rutas de API (auth, registro, catálogo, horarios, zona, pagos, IA, WhatsApp, uploads,
+                             pedidos, conversaciones, notificaciones)
+src/components/operations-alerts-provider.tsx  Sondeo de alertas en vivo (Fase 4): badge, sonido, notificación del navegador
 src/app/api/webhooks/        Endpoints públicos que llama Meta directamente (sin sesión)
 src/proxy.ts                 Protección de rutas (login requerido / redirect)
 tests/                       Tests de Vitest de las rutas críticas del motor de pedidos (Fase 3)
