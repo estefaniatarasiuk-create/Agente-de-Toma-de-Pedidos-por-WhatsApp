@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import type { LlmAction, DraftOrderState } from "@/lib/validations/order-engine";
 import { findProductMatch, findSimilarProducts } from "@/lib/orders/catalog-matching";
 import { validateDeliveryAddress } from "@/lib/orders/zone-validation";
+import { normalizeAddress } from "@/lib/geocoding";
 import { parsePriceToCents } from "@/lib/validations/product";
 import { createOrderFromDraft } from "@/lib/orders/create-order";
 import {
@@ -110,8 +111,13 @@ export async function applyActions(params: {
       if (action.name) draft.customerName = action.name;
       if (action.addressNotes) draft.deliveryAddressNotes = action.addressNotes;
 
-      if (action.address) {
-        const validation = await validateDeliveryAddress(params.branchId, action.address);
+      // Mismo problema que con add_item: la IA reemite set_customer_info con
+      // la misma dirección casi cada vez que resume el pedido. Sin este
+      // chequeo, se volvía a geocodificar y a mandar "Anoté tu domicilio
+      // como..." de nuevo en cada turno, aunque no hubiera cambiado nada.
+      const addressIsNew = action.address && normalizeAddress(action.address) !== normalizeAddress(draft.deliveryAddressRaw ?? "");
+      if (addressIsNew) {
+        const validation = await validateDeliveryAddress(params.branchId, action.address!);
         if (validation.status === "ok") {
           draft.deliveryAddressRaw = action.address;
           draft.deliveryAddressNormalized = validation.formattedAddress;
