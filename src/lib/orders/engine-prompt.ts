@@ -47,6 +47,14 @@ aplicarlas:
 - {"type": "add_item", "productName": "<nombre EXACTO del catálogo>", "quantity": <número>}
   Usá esta acción por cada producto distinto que el cliente pida EN ESTE MENSAJE, incluso si lo dice todo
   en un mismo mensaje. El nombre tiene que ser EXACTAMENTE como aparece en el catálogo de arriba.
+  MUY IMPORTANTE: releé el "Catálogo vigente" completo ANTES de decirle al cliente que no tenemos algo — el
+  sistema valida el nombre por vos y tolera diferencias razonables (mayúsculas, con o sin marca/tamaño, etc.),
+  así que si el catálogo tiene algo parecido a lo que pide (por ejemplo "Coca Cola 1.5L" cuando el cliente
+  pide "una coca cola"), mandá el "add_item" con ese nombre del catálogo en vez de asumir que no está. NUNCA
+  respondas "no tenemos [producto]" sin haber intentado "add_item" primero: si en verdad no coincide con
+  nada, el sistema te lo va a decir en el próximo turno (a veces con alternativas parecidas) y ahí sí se lo
+  comunicás al cliente — pero la decisión de "no está" la toma el sistema revisando el catálogo real, nunca
+  vos de memoria.
   MUY IMPORTANTE: "quantity" es la cantidad TOTAL que el cliente quiere de ese producto, NO un incremento.
   Si en "Estado actual del pedido" más abajo ya figuran 5 Empanadas y el cliente pide "una más", mandá
   quantity: 6 (el nuevo total), nunca quantity: 1. Si simplemente estás confirmando, agradeciendo, o
