@@ -47,6 +47,7 @@ async function completeWithOpenAI(
   system: string | undefined,
   messages: LlmMessage[],
   maxTokens: number,
+  jsonMode: boolean,
 ): Promise<LlmResult> {
   const apiKey = process.env.OPENAI_API_KEY;
   const model = process.env.OPENAI_MODEL;
@@ -82,6 +83,7 @@ async function completeWithOpenAI(
     model,
     messages: openaiMessages,
     max_completion_tokens: maxTokens,
+    ...(jsonMode ? { response_format: { type: "json_object" as const } } : {}),
   });
 
   const text = response.choices[0]?.message?.content ?? "";
@@ -103,6 +105,7 @@ async function completeWithAnthropic(
   system: string | undefined,
   messages: LlmMessage[],
   maxTokens: number,
+  jsonMode: boolean,
 ): Promise<LlmResult> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   const model = process.env.ANTHROPIC_MODEL;
@@ -134,6 +137,11 @@ async function completeWithAnthropic(
     return { role: "user", content: message.text };
   });
 
+  // Claude no tiene un "modo JSON" nativo como OpenAI: se lo fuerza
+  // "prellenando" el inicio de su propia respuesta con "{", así continúa
+  // directo en JSON en vez de arrancar con una frase conversacional.
+  if (jsonMode) anthropicMessages.push({ role: "assistant", content: "{" });
+
   const response = await client.messages.create({
     model,
     max_tokens: maxTokens,
@@ -141,10 +149,11 @@ async function completeWithAnthropic(
     messages: anthropicMessages,
   });
 
-  const text = response.content
+  const rawText = response.content
     .filter((block): block is Anthropic.TextBlock => block.type === "text")
     .map((block) => block.text)
     .join("\n");
+  const text = jsonMode ? `{${rawText}` : rawText;
   const promptTokens = response.usage.input_tokens;
   const completionTokens = response.usage.output_tokens;
 
@@ -164,13 +173,19 @@ export async function completeChat(params: {
   system?: string;
   messages: LlmMessage[];
   maxTokens?: number;
+  // Fuerza que la respuesta sea JSON válido (usado por todo lo que parsea
+  // la respuesta con extractJsonBlock/JSON.parse — el modo "probar
+  // conversación" de la Fase 1 no lo necesita, ahí la respuesta es texto
+  // libre para mostrar tal cual).
+  jsonMode?: boolean;
 }): Promise<LlmResult> {
   const maxTokens = params.maxTokens ?? 2000;
+  const jsonMode = params.jsonMode ?? false;
   const provider = getProvider();
   if (provider === "openai") {
-    return completeWithOpenAI(params.system, params.messages, maxTokens);
+    return completeWithOpenAI(params.system, params.messages, maxTokens, jsonMode);
   }
-  return completeWithAnthropic(params.system, params.messages, maxTokens);
+  return completeWithAnthropic(params.system, params.messages, maxTokens, jsonMode);
 }
 
 export function getActiveModel(): string {

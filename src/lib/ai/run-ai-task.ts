@@ -13,11 +13,13 @@ export async function runAiTask(params: {
   system?: string;
   messages: LlmMessage[];
   maxTokens?: number;
+  jsonMode?: boolean;
 }): Promise<LlmResult> {
   const result = await completeChat({
     system: params.system,
     messages: params.messages,
     maxTokens: params.maxTokens,
+    jsonMode: params.jsonMode,
   });
 
   await prisma.aIUsageLog.create({

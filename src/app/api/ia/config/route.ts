@@ -42,6 +42,7 @@ async function checkContradictions(params: {
       companyId: params.companyId,
       branchId: params.branchId,
       maxTokens: 500,
+      jsonMode: true,
       system: `Comparás instrucciones en texto libre de un comercio contra su configuración estructurada
 (horarios y zona de entrega) y detectás contradicciones explícitas (ej: el texto libre menciona horarios
 o una zona distinta a la configurada). Devolvé ÚNICAMENTE JSON: {"warnings": ["..."]} (array vacío si no

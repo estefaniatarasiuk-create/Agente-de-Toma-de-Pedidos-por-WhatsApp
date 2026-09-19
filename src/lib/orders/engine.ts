@@ -151,6 +151,7 @@ export async function processInboundMessage(params: { conversationId: string; me
       system,
       messages: llmMessages,
       maxTokens: 1000,
+      jsonMode: true,
     });
     parsedResponse = llmTurnResponseSchema.parse(JSON.parse(extractJsonBlock(result.text)));
   } catch (error) {

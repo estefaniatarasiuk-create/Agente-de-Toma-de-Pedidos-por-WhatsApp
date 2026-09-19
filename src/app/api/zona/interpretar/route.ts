@@ -30,6 +30,7 @@ export async function POST(request: Request) {
       branchId: context.branchId,
       system: SYSTEM_PROMPT,
       maxTokens: 200,
+      jsonMode: true,
       messages: [{ role: "user", text }],
     });
 
