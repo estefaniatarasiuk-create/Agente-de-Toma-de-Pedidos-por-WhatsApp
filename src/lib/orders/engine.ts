@@ -172,7 +172,7 @@ export async function processInboundMessage(params: { conversationId: string; me
 
   if (requiresHuman) {
     await prisma.conversation.update({ where: { id: conversation.id }, data: { status: "REQUIRES_ATTENTION" } });
-    await sendText(buildRequiresHumanMessage());
+    await sendText(correctionNotes.length > 0 ? correctionNotes.join("\n\n") : buildRequiresHumanMessage());
     return;
   }
 

@@ -58,6 +58,10 @@ export function buildZoneNotConfiguredMessage(): string {
   return "Por ahora no podemos validar domicilios de entrega, estamos terminando de configurar la zona. ¡Escribinos en un rato!";
 }
 
+export function buildGeocodingUnavailableMessage(): string {
+  return "Tuvimos un problema técnico validando tu domicilio. Ya avisamos a una persona de nuestro equipo para que te ayude a terminar el pedido.";
+}
+
 export function buildRequiresHumanMessage(): string {
   return "Ya te voy a comunicar con una persona de nuestro equipo para que te ayude. Danos un momento, por favor.";
 }

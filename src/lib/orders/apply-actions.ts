@@ -6,6 +6,7 @@ import { parsePriceToCents } from "@/lib/validations/product";
 import { createOrderFromDraft } from "@/lib/orders/create-order";
 import {
   buildAmbiguousAddressMessage,
+  buildGeocodingUnavailableMessage,
   buildOrderConfirmedMessage,
   buildOutOfZoneMessage,
   buildPaymentInfoMessage,
@@ -45,6 +46,10 @@ export async function applyActions(params: {
   };
   const correctionNotes: string[] = [];
   const extras: OutboundExtra[] = [];
+  // Falla técnica validando un domicilio (ej. sin API key de geocoding
+  // configurada): no podemos confiar en la regla dura de zona, así que se
+  // deriva a un humano en vez de seguir como si no hubiera pasado nada.
+  let requiresHumanForTechnicalFailure = false;
 
   // Si el cliente pide hablar con una persona, eso manda por sobre
   // cualquier otra cosa que la IA haya intentado hacer en el mismo turno.
@@ -101,6 +106,9 @@ export async function applyActions(params: {
           draft = { items: [] };
         } else if (validation.status === "ambiguous") {
           correctionNotes.push(buildAmbiguousAddressMessage());
+        } else if (validation.status === "geocoding_unavailable") {
+          correctionNotes.push(buildGeocodingUnavailableMessage());
+          requiresHumanForTechnicalFailure = true;
         } else {
           correctionNotes.push(buildZoneNotConfiguredMessage());
         }
@@ -167,5 +175,5 @@ export async function applyActions(params: {
     }
   }
 
-  return { draft, correctionNotes, extras, requiresHuman: false, orderCreated: false };
+  return { draft, correctionNotes, extras, requiresHuman: requiresHumanForTechnicalFailure, orderCreated: false };
 }
