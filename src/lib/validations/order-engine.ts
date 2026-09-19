@@ -20,6 +20,11 @@ export const draftOrderStateSchema = z.object({
   deliveryAddressNormalized: z.string().optional(),
   paymentMethod: z.enum(["CASH", "TRANSFER"]).optional(),
   cashPaymentAmountCents: z.number().int().optional(),
+  // Cuenta confirm_order bloqueados seguidos (el cliente confirma pero el
+  // pedido no se registra, por ej. porque la IA reemite un dato ya
+  // establecido en el mismo turno). Es la salida de emergencia para no
+  // quedar rebotando para siempre: ver apply-actions.ts.
+  confirmAttempts: z.number().int().nonnegative().optional(),
 });
 
 export type DraftOrderState = z.infer<typeof draftOrderStateSchema>;

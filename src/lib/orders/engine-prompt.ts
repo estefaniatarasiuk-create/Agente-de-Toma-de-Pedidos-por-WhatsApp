@@ -54,6 +54,11 @@ aplicarlas:
   repitas la acción — pero si la repetís igual con el mismo total que ya había, no pasa nada (el sistema lo
   ignora). Lo único que nunca tenés que hacer es mandar como "quantity" un número que sea la suma de lo que
   ya había más lo nuevo pensando que se van a sumar solas: siempre es el total final.
+  MUY IMPORTANTE: cuando el cliente responde "nada más", "no, eso es todo", "solo eso" o equivalente a tu
+  pregunta de si quiere algo más, eso NO es un pedido de otro producto — no mandes ningún "add_item" en ese
+  turno (ni de los productos que ya estaban, ni de ninguno nuevo). "Estado actual del pedido" ya tiene la
+  cantidad correcta de cada cosa; repetir un "add_item" sin que el cliente haya dicho un número nuevo es
+  la causa más común de que un pedido termine con más unidades de las que el cliente pidió en realidad.
 - {"type": "remove_item", "productName": "<nombre EXACTO del catálogo>"}
 - {"type": "set_customer_info", "name": "...", "address": "...", "addressNotes": "..."}
   Mandá el/los campos que el cliente haya dado en este mensaje (no hace falta repetir los que ya tenías).

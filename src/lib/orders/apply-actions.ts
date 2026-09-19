@@ -199,15 +199,26 @@ export async function applyActions(params: {
     }
 
     if (action.type === "confirm_order") {
-      if (!wasReadyToConfirmBeforeThisTurn) {
+      if (!wasReadyToConfirmBeforeThisTurn || draftChangedThisTurn) {
+        // Cada vez que el cliente intenta confirmar y no se puede, sumamos
+        // un intento. Si esto se repite (en pruebas reales llegó a pasar 3
+        // veces seguidas, siempre con el mismo mensaje, sin que el cliente
+        // entendiera por qué), seguir pidiendo "confirmame de nuevo" es
+        // peor que el problema que evitamos: el negocio pierde el pedido
+        // por completo. A partir del 3er intento fallido se deriva a un
+        // humano en vez de seguir rebotando — ya puede verlo y resolverlo
+        // desde el panel de Fase 4.
+        draft.confirmAttempts = (draft.confirmAttempts ?? 0) + 1;
+        if (draft.confirmAttempts >= 3) {
+          correctionNotes.push(
+            "Perdón, tuve un problema para registrar tu pedido. Ya avisé para que alguien del local lo revise y te contacte en breve.",
+          );
+          return { draft, correctionNotes, extras, requiresHuman: true, orderCreated: false };
+        }
         correctionNotes.push(
-          "¡Ya tengo todos los datos de tu pedido! Fijate el resumen y confirmámelo en tu próximo mensaje para registrarlo.",
-        );
-        continue;
-      }
-      if (draftChangedThisTurn) {
-        correctionNotes.push(
-          "Antes de confirmar, actualicé tu pedido con el cambio que me pediste. Fijate que quedó bien y confirmame de nuevo para registrarlo.",
+          !wasReadyToConfirmBeforeThisTurn
+            ? "¡Ya tengo todos los datos de tu pedido! Fijate el resumen y confirmámelo en tu próximo mensaje para registrarlo."
+            : "Antes de confirmar, actualicé tu pedido con el cambio que me pediste. Fijate que quedó bien y confirmame de nuevo para registrarlo.",
         );
         continue;
       }
@@ -249,6 +260,15 @@ export async function applyActions(params: {
       extras.push({ kind: "catalog_image" });
       continue;
     }
+  }
+
+  // Si el cliente hizo un cambio real sin intentar confirmar en el mismo
+  // turno, está avanzando el pedido de forma normal, no rebotando contra un
+  // confirm_order bloqueado — reiniciamos el contador para no derivar a un
+  // humano por una racha de mensajes que no tienen nada que ver entre sí.
+  const attemptedConfirmThisTurn = params.actions.some((action) => action.type === "confirm_order");
+  if (draftChangedThisTurn && !attemptedConfirmThisTurn && (draft.confirmAttempts ?? 0) > 0) {
+    draft.confirmAttempts = 0;
   }
 
   return { draft, correctionNotes, extras, requiresHuman: requiresHumanForTechnicalFailure, orderCreated: false };

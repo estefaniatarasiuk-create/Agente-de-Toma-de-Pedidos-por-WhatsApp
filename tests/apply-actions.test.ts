@@ -378,6 +378,121 @@ describe("applyActions — confirm_order exige un turno aparte del que completó
   });
 });
 
+// Regresión del bug más grave reportado en la Fase 4: un cliente confirmó un
+// pedido completo TRES veces seguidas ("Si ya abone" → "Ok" → "Confirmo el
+// pedido") y el sistema nunca lo registró — cada intento chocaba con la
+// misma defensa de código (confirm_order bloqueado) y quedaba pidiendo
+// "confirmame de nuevo" para siempre. Bloquear estaba bien para evitar
+// duplicar datos, pero rebotar sin salida es peor: el negocio pierde el
+// pedido por completo. A partir del 3er intento fallido seguido, se deriva
+// a un humano (que ya puede resolverlo desde el panel) en vez de insistir.
+describe("applyActions — deriva a un humano si confirm_order se bloquea repetidas veces seguidas", () => {
+  const companiesToCleanup: string[] = [];
+
+  afterAll(async () => {
+    for (const companyId of companiesToCleanup) await cleanupCompany(companyId);
+  });
+
+  it("deriva a atención humana en el 3er confirm_order bloqueado seguido, sin crear el pedido", async () => {
+    const { company, branch } = await createTestCompanyAndBranch();
+    companiesToCleanup.push(company.id);
+    const product = await prisma.product.create({
+      data: { companyId: company.id, branchId: branch.id, name: "Chipa", priceCents: 300000 },
+    });
+    await prisma.paymentMethodConfig.create({
+      data: { companyId: company.id, branchId: branch.id, cashEnabled: true, transferEnabled: true },
+    });
+    const conversation = await prisma.conversation.create({
+      data: { companyId: company.id, branchId: branch.id, customerPhone: "5491100000008" },
+    });
+
+    // Pedido YA completo, pero cada turno la IA reemite set_payment_method
+    // (aunque el cliente solo está confirmando) — cada intento se bloquea.
+    const draft = {
+      items: [{ productId: product.id, productName: product.name, unitPriceCents: product.priceCents, quantity: 5 }],
+      customerName: "Cliente Test",
+      deliveryAddressRaw: "Calle Falsa 123",
+      deliveryLatitude: -34.6,
+      deliveryLongitude: -58.38,
+      paymentMethod: "CASH" as const,
+    };
+
+    const first = await applyActions({
+      companyId: company.id,
+      branchId: branch.id,
+      conversationId: conversation.id,
+      customerPhone: "5491100000008",
+      draft,
+      actions: [{ type: "set_payment_method", method: "TRANSFER" }, { type: "confirm_order" }],
+    });
+    expect(first.orderCreated).toBe(false);
+    expect(first.requiresHuman).toBe(false);
+    expect(first.draft.confirmAttempts).toBe(1);
+
+    const second = await applyActions({
+      companyId: company.id,
+      branchId: branch.id,
+      conversationId: conversation.id,
+      customerPhone: "5491100000008",
+      draft: first.draft,
+      actions: [{ type: "set_payment_method", method: "CASH" }, { type: "confirm_order" }],
+    });
+    expect(second.orderCreated).toBe(false);
+    expect(second.requiresHuman).toBe(false);
+    expect(second.draft.confirmAttempts).toBe(2);
+
+    const third = await applyActions({
+      companyId: company.id,
+      branchId: branch.id,
+      conversationId: conversation.id,
+      customerPhone: "5491100000008",
+      draft: second.draft,
+      actions: [{ type: "set_payment_method", method: "TRANSFER" }, { type: "confirm_order" }],
+    });
+    expect(third.orderCreated).toBe(false);
+    expect(third.requiresHuman).toBe(true);
+
+    const orders = await prisma.order.findMany({ where: { branchId: branch.id } });
+    expect(orders).toHaveLength(0);
+  });
+
+  it("reinicia el contador de intentos si el cliente avanza el pedido en vez de intentar confirmar", async () => {
+    const { company, branch } = await createTestCompanyAndBranch();
+    companiesToCleanup.push(company.id);
+    const product = await prisma.product.create({
+      data: { companyId: company.id, branchId: branch.id, name: "Chipa", priceCents: 300000 },
+    });
+    await prisma.paymentMethodConfig.create({
+      data: { companyId: company.id, branchId: branch.id, cashEnabled: true, transferEnabled: true },
+    });
+    const conversation = await prisma.conversation.create({
+      data: { companyId: company.id, branchId: branch.id, customerPhone: "5491100000009" },
+    });
+
+    const draft = {
+      items: [{ productId: product.id, productName: product.name, unitPriceCents: product.priceCents, quantity: 5 }],
+      customerName: "Cliente Test",
+      deliveryAddressRaw: "Calle Falsa 123",
+      deliveryLatitude: -34.6,
+      deliveryLongitude: -58.38,
+      paymentMethod: "CASH" as const,
+      confirmAttempts: 2,
+    };
+
+    const result = await applyActions({
+      companyId: company.id,
+      branchId: branch.id,
+      conversationId: conversation.id,
+      customerPhone: "5491100000009",
+      draft,
+      actions: [{ type: "add_item", productName: "Chipa", quantity: 6 }],
+    });
+
+    expect(result.requiresHuman).toBe(false);
+    expect(result.draft.confirmAttempts).toBe(0);
+  });
+});
+
 // Regresión: la IA reemite set_customer_info con la misma dirección (a
 // veces redactada un poco distinto) casi cada vez que resume el pedido —
 // sin este fix, cada repetición volvía a mandar "Anoté tu domicilio
