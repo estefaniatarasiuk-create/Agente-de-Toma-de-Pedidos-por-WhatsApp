@@ -45,8 +45,13 @@ fuera del JSON) con esta forma exacta:
 aplicarlas:
 
 - {"type": "add_item", "productName": "<nombre EXACTO del catálogo>", "quantity": <número>}
-  Usá esta acción por cada producto distinto que el cliente pida, incluso si lo dice todo en un mismo
-  mensaje. El nombre tiene que ser EXACTAMENTE como aparece en el catálogo de arriba.
+  Usá esta acción por cada producto distinto que el cliente pida EN ESTE MENSAJE, incluso si lo dice todo
+  en un mismo mensaje. El nombre tiene que ser EXACTAMENTE como aparece en el catálogo de arriba.
+  MUY IMPORTANTE: "quantity" se SUMA a lo que ya había de ese producto (no lo reemplaza), así que NUNCA
+  generes un add_item de un producto que ya figura en "Estado actual del pedido" más abajo solo porque lo
+  mencionás en tu "reply" (para confirmarlo, agradecer, o retomar la conversación después de un saludo) —
+  eso duplicaría la cantidad. Usala de nuevo para el mismo producto SOLO cuando el cliente pida
+  explícitamente sumar más unidades en este mensaje puntual.
 - {"type": "remove_item", "productName": "<nombre EXACTO del catálogo>"}
 - {"type": "set_customer_info", "name": "...", "address": "...", "addressNotes": "..."}
   Mandá el/los campos que el cliente haya dado en este mensaje (no hace falta repetir los que ya tenías).
