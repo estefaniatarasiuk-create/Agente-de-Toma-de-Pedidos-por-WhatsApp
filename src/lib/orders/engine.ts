@@ -198,7 +198,13 @@ export async function processInboundMessage(params: { conversationId: string; me
     parsedResponse = llmTurnResponseSchema.parse(JSON.parse(extractJsonBlock(result.text)));
   } catch (error) {
     console.error("La IA no pudo interpretar el mensaje, derivando a atención humana:", error);
-    await prisma.conversation.update({ where: { id: conversation.id }, data: { status: "REQUIRES_ATTENTION" } });
+    // Se limpia el borrador al derivar (ver comentario más abajo, en el otro
+    // punto donde se deriva a atención humana): así ningún dato a medio
+    // terminar queda flotando por si la conversación se reactiva después.
+    await prisma.conversation.update({
+      where: { id: conversation.id },
+      data: { status: "REQUIRES_ATTENTION", draftOrder: { items: [] }, currentStep: null },
+    });
     await sendText(buildRequiresHumanMessage());
     return;
   }
@@ -213,7 +219,20 @@ export async function processInboundMessage(params: { conversationId: string; me
   });
 
   if (requiresHuman) {
-    await prisma.conversation.update({ where: { id: conversation.id }, data: { status: "REQUIRES_ATTENTION" } });
+    // Bug real encontrado en vivo: un pedido escaló a atención humana (acá
+    // por agotar los reintentos de confirmación) con un borrador a medio
+    // terminar sin limpiar. Más tarde el cliente dijo "vamos de nuevo" para
+    // un pedido totalmente distinto, y como el borrador viejo seguía ahí
+    // (invisible para el cliente), sus ítems abandonados se sumaron en
+    // silencio al pedido nuevo — terminó confirmándose por más de lo que el
+    // cliente pidió. Se limpia el borrador siempre que se deriva a un
+    // humano: la conversación y sus mensajes quedan intactos para que la
+    // persona los revise, pero ningún pedido a medio armar puede
+    // resucitar solo cuando la IA retoma el control.
+    await prisma.conversation.update({
+      where: { id: conversation.id },
+      data: { status: "REQUIRES_ATTENTION", draftOrder: { items: [] }, currentStep: null },
+    });
     await sendText(correctionNotes.length > 0 ? correctionNotes.join("\n\n") : buildRequiresHumanMessage());
     return;
   }

@@ -94,6 +94,13 @@ aplicarlas:
   el sistema aparte, automáticamente, y SOLO si confirm_order se aplicó con éxito (puede fallar si falta un
   dato, aunque vos creas que no). Si tu "reply" le hace creer al cliente que el pedido quedó listo pero vos
   no incluiste confirm_order en "actions", le mentiste y el pedido nunca se va a preparar.
+  MUY IMPORTANTE: si el mensaje del cliente es SOLO una confirmación (algo como "sí", "dale", "confirmo",
+  "está bien", "nada más", "gracias") sin mencionar ningún producto, cantidad, domicilio ni medio de pago
+  nuevo, tu "actions" de ese turno tiene que ser ÚNICAMENTE "confirm_order" — no mandes "add_item",
+  "remove_item", "set_customer_info" ni "set_payment_method" junto con ella. El sistema NUNCA confirma un
+  pedido en el mismo turno en que además cambió algo (aunque el cambio sea un error tuyo, como recalcular
+  mal una cantidad), así que agregar cualquier otra acción en un turno de pura confirmación solo hace que el
+  pedido rebote sin registrarse.
 - {"type": "request_human"}
   Usala si el cliente pide explícitamente hablar con una persona, o si no entendés qué está pidiendo
   después de intentarlo.
@@ -135,7 +142,7 @@ ${draftSummary}
 Nombre del cliente: ${params.draft.customerName ? params.draft.customerName : "TODAVÍA NO LO DIJO — no armes un resumen ni pidas confirmar hasta tenerlo"}
 Domicilio de entrega: ${params.draft.deliveryAddressRaw ? `${params.draft.deliveryAddressRaw}${params.draft.deliveryAddressNotes ? ` (${params.draft.deliveryAddressNotes})` : ""}` : "TODAVÍA NO LO DIJO — no armes un resumen ni pidas confirmar hasta tenerlo"}
 Medio de pago: ${params.draft.paymentMethod ? (params.draft.paymentMethod === "CASH" ? "efectivo" : "transferencia") : "TODAVÍA NO LO ELIGIÓ — no armes un resumen ni pidas confirmar hasta tenerlo"}
-${activeOrderText ? `\nEste cliente ya tiene un pedido en curso (independiente del que se esté armando arriba): ${activeOrderText}` : ""}`;
+${activeOrderText ? `\nEste cliente ya tiene un pedido en curso (independiente del que se esté armando arriba): ${activeOrderText} Si pide agregar productos, NO se pueden sumar a ese pedido (ya está en preparación o en camino, no se puede modificar) — arma un PEDIDO NUEVO Y SEPARADO con lo que pida ahora, y avisale explícitamente en tu "reply" que eso le va a llegar en una entrega aparte del pedido que ya tiene en curso.` : ""}`;
 
   return { branchName, system };
 }
