@@ -337,6 +337,45 @@ describe("applyActions — confirm_order exige un turno aparte del que completó
     });
     expect(secondResult.orderCreated).toBe(true);
   });
+
+  it("no confirma si el cliente cambia un medio de pago YA establecido en el mismo turno (bug real reportado en la Fase 4)", async () => {
+    const { company, branch } = await createTestCompanyAndBranch();
+    companiesToCleanup.push(company.id);
+    const product = await prisma.product.create({
+      data: { companyId: company.id, branchId: branch.id, name: "Chipa", priceCents: 300000 },
+    });
+    await prisma.paymentMethodConfig.create({
+      data: { companyId: company.id, branchId: branch.id, cashEnabled: true, transferEnabled: true },
+    });
+    const conversation = await prisma.conversation.create({
+      data: { companyId: company.id, branchId: branch.id, customerPhone: "5491100000007" },
+    });
+
+    // Pedido YA completo, con pago en efectivo — igual que en el reporte real,
+    // el cliente solo pide cambiar el medio de pago, no confirma nada.
+    const draftReady = {
+      items: [{ productId: product.id, productName: product.name, unitPriceCents: product.priceCents, quantity: 5 }],
+      customerName: "Estefanía",
+      deliveryAddressRaw: "Calle Falsa 123",
+      deliveryLatitude: -34.6,
+      deliveryLongitude: -58.38,
+      paymentMethod: "CASH" as const,
+    };
+
+    const result = await applyActions({
+      companyId: company.id,
+      branchId: branch.id,
+      conversationId: conversation.id,
+      customerPhone: "5491100000007",
+      draft: draftReady,
+      actions: [{ type: "set_payment_method", method: "TRANSFER" }, { type: "confirm_order" }],
+    });
+
+    expect(result.orderCreated).toBe(false);
+    expect(result.draft.paymentMethod).toBe("TRANSFER");
+    const orders = await prisma.order.findMany({ where: { branchId: branch.id } });
+    expect(orders).toHaveLength(0);
+  });
 });
 
 // Regresión: la IA reemite set_customer_info con la misma dirección (a

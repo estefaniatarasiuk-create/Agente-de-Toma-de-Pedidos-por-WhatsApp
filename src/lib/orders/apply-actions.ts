@@ -52,14 +52,16 @@ export async function applyActions(params: {
   // configurada): no podemos confiar en la regla dura de zona, así que se
   // deriva a un humano en vez de seguir como si no hubiera pasado nada.
   let requiresHumanForTechnicalFailure = false;
-  // Nunca se confirma un pedido en el mismo turno en que se modificaron los
-  // ítems (aunque la IA haya emitido confirm_order igual): en pruebas reales
-  // el modelo a veces reemite un add_item de algo que ya estaba en el
-  // pedido justo al confirmar (al "resumirlo" en su reply), duplicando la
-  // cantidad — el cliente terminaba viendo un total el doble del acordado.
-  // Es más seguro pedirle una confirmación aparte, sin cambios en el mismo
-  // mensaje, que confiar en que el modelo nunca vuelva a hacer esto.
-  let itemsChangedThisTurn = false;
+  // Nunca se confirma un pedido en el mismo turno en que se modificó algún
+  // dato de verdad (ítems, nombre, domicilio o medio de pago) — aunque la IA
+  // haya emitido confirm_order igual. En pruebas reales el modelo llegó a
+  // reemitir un add_item de algo que ya estaba en el pedido justo al
+  // confirmar (duplicando la cantidad), y por separado incluyó confirm_order
+  // en un mensaje donde el cliente solo cambiaba el medio de pago (no
+  // confirmaba nada). Es más seguro pedirle una confirmación aparte, sin
+  // cambios en el mismo mensaje, que confiar en que el modelo distinga
+  // "el cliente está confirmando" de "el cliente está dando/cambiando un dato".
+  let draftChangedThisTurn = false;
   // Otra defensa de código, no de prompt: confirm_order solo puede tener
   // éxito si el pedido YA estaba completo (los 4 datos: productos, nombre,
   // domicilio, pago) ANTES de este turno — nunca en el mismo mensaje que
@@ -96,7 +98,7 @@ export async function applyActions(params: {
       // no infle el pedido — fijar el mismo número de nuevo es un no-op.
       const existing = draft.items.find((item) => item.productId === product.id);
       if (existing) {
-        if (existing.quantity !== action.quantity) itemsChangedThisTurn = true;
+        if (existing.quantity !== action.quantity) draftChangedThisTurn = true;
         existing.quantity = action.quantity;
       } else {
         draft.items.push({
@@ -105,7 +107,7 @@ export async function applyActions(params: {
           unitPriceCents: product.priceCents,
           quantity: action.quantity,
         });
-        itemsChangedThisTurn = true;
+        draftChangedThisTurn = true;
       }
       continue;
     }
@@ -114,12 +116,15 @@ export async function applyActions(params: {
       const normalizedQuery = action.productName.trim().toLowerCase();
       const itemCountBefore = draft.items.length;
       draft.items = draft.items.filter((item) => item.productName.toLowerCase() !== normalizedQuery);
-      if (draft.items.length !== itemCountBefore) itemsChangedThisTurn = true;
+      if (draft.items.length !== itemCountBefore) draftChangedThisTurn = true;
       continue;
     }
 
     if (action.type === "set_customer_info") {
-      if (action.name) draft.customerName = action.name;
+      if (action.name && action.name !== draft.customerName) {
+        draft.customerName = action.name;
+        draftChangedThisTurn = true;
+      }
       if (action.addressNotes) draft.deliveryAddressNotes = action.addressNotes;
 
       if (action.address) {
@@ -144,6 +149,7 @@ export async function applyActions(params: {
           draft.deliveryLongitude = validation.longitude;
 
           if (!isSameLocationAsBefore) {
+            draftChangedThisTurn = true;
             // Confirmarle al cliente el domicilio COMPLETO que entendimos
             // (con localidad/barrio) es la única forma de que note si la
             // geocodificación se equivocó de zona con un nombre de calle
@@ -177,10 +183,14 @@ export async function applyActions(params: {
         correctionNotes.push(`Ese medio de pago no está disponible acá. Contame cómo vas a pagar de las opciones que te ofrecimos.`);
         continue;
       }
+      if (action.method !== draft.paymentMethod) draftChangedThisTurn = true;
       draft.paymentMethod = action.method;
       if (action.method === "CASH" && action.cashAmount !== undefined) {
         const cents = parsePriceToCents(action.cashAmount);
-        if (cents !== null) draft.cashPaymentAmountCents = cents;
+        if (cents !== null && cents !== draft.cashPaymentAmountCents) {
+          draft.cashPaymentAmountCents = cents;
+          draftChangedThisTurn = true;
+        }
       }
       if (action.method === "TRANSFER" && paymentConfig) {
         extras.push({ kind: "text", text: buildPaymentInfoMessage(paymentConfig) });
@@ -195,7 +205,7 @@ export async function applyActions(params: {
         );
         continue;
       }
-      if (itemsChangedThisTurn) {
+      if (draftChangedThisTurn) {
         correctionNotes.push(
           "Antes de confirmar, actualicé tu pedido con el cambio que me pediste. Fijate que quedó bien y confirmame de nuevo para registrarlo.",
         );
