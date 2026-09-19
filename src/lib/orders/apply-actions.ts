@@ -2,9 +2,10 @@ import { prisma } from "@/lib/prisma";
 import type { LlmAction, DraftOrderState } from "@/lib/validations/order-engine";
 import { findProductMatch, findSimilarProducts } from "@/lib/orders/catalog-matching";
 import { validateDeliveryAddress } from "@/lib/orders/zone-validation";
-import { normalizeAddress } from "@/lib/geocoding";
+import { distanceKm } from "@/lib/geocoding";
 import { parsePriceToCents } from "@/lib/validations/product";
 import { createOrderFromDraft } from "@/lib/orders/create-order";
+import { computeCurrentStep } from "@/lib/orders/draft-step";
 import {
   buildAmbiguousAddressMessage,
   buildGeocodingUnavailableMessage,
@@ -59,6 +60,16 @@ export async function applyActions(params: {
   // Es más seguro pedirle una confirmación aparte, sin cambios en el mismo
   // mensaje, que confiar en que el modelo nunca vuelva a hacer esto.
   let itemsChangedThisTurn = false;
+  // Otra defensa de código, no de prompt: confirm_order solo puede tener
+  // éxito si el pedido YA estaba completo (los 4 datos: productos, nombre,
+  // domicilio, pago) ANTES de este turno — nunca en el mismo mensaje que
+  // recién completó el último dato que faltaba. En pruebas reales la IA
+  // llegó a incluir confirm_order en un mensaje donde el cliente solo
+  // cambiaba el medio de pago (no estaba confirmando nada), y el pedido
+  // hubiera quedado registrado sin que el cliente lo pidiera de verdad.
+  // Exigir un mensaje aparte para confirmar es más seguro que confiar en
+  // que el modelo distinga "cliente confirma" de "cliente completa un dato".
+  const wasReadyToConfirmBeforeThisTurn = computeCurrentStep(params.draft) === "CONFIRMING";
 
   // Si el cliente pide hablar con una persona, eso manda por sobre
   // cualquier otra cosa que la IA haya intentado hacer en el mismo turno.
@@ -111,26 +122,37 @@ export async function applyActions(params: {
       if (action.name) draft.customerName = action.name;
       if (action.addressNotes) draft.deliveryAddressNotes = action.addressNotes;
 
-      // Mismo problema que con add_item: la IA reemite set_customer_info con
-      // la misma dirección casi cada vez que resume el pedido. Sin este
-      // chequeo, se volvía a geocodificar y a mandar "Anoté tu domicilio
-      // como..." de nuevo en cada turno, aunque no hubiera cambiado nada.
-      const addressIsNew = action.address && normalizeAddress(action.address) !== normalizeAddress(draft.deliveryAddressRaw ?? "");
-      if (addressIsNew) {
-        const validation = await validateDeliveryAddress(params.branchId, action.address!);
+      if (action.address) {
+        const validation = await validateDeliveryAddress(params.branchId, action.address);
         if (validation.status === "ok") {
+          // La IA reemite set_customer_info con la misma dirección casi cada
+          // vez que resume el pedido, a veces con una redacción levemente
+          // distinta (con o sin entrecalles) — comparar por coordenadas en
+          // vez de por el texto evita repetir "Anoté tu domicilio como..."
+          // cuando en realidad sigue siendo el mismo lugar de siempre.
+          const isSameLocationAsBefore =
+            draft.deliveryLatitude !== undefined &&
+            draft.deliveryLongitude !== undefined &&
+            distanceKm(
+              { latitude: draft.deliveryLatitude, longitude: draft.deliveryLongitude },
+              { latitude: validation.latitude, longitude: validation.longitude },
+            ) < 0.05;
+
           draft.deliveryAddressRaw = action.address;
           draft.deliveryAddressNormalized = validation.formattedAddress;
           draft.deliveryLatitude = validation.latitude;
           draft.deliveryLongitude = validation.longitude;
-          // Confirmarle al cliente el domicilio COMPLETO que entendimos
-          // (con localidad/barrio) es la única forma de que note si la
-          // geocodificación se equivocó de zona con un nombre de calle
-          // repetido — no alcanza con aceptarlo en silencio.
-          extras.push({
-            kind: "text",
-            text: `Anoté tu domicilio como: ${validation.formattedAddress}. Si no es el correcto, contame de nuevo con más detalle (localidad, entre qué calles, etc.).`,
-          });
+
+          if (!isSameLocationAsBefore) {
+            // Confirmarle al cliente el domicilio COMPLETO que entendimos
+            // (con localidad/barrio) es la única forma de que note si la
+            // geocodificación se equivocó de zona con un nombre de calle
+            // repetido — no alcanza con aceptarlo en silencio.
+            extras.push({
+              kind: "text",
+              text: `Anoté tu domicilio como: ${validation.formattedAddress}. Si no es el correcto, contame de nuevo con más detalle (localidad, entre qué calles, etc.).`,
+            });
+          }
         } else if (validation.status === "out_of_zone") {
           correctionNotes.push(buildOutOfZoneMessage());
           // Fuera de zona: no tiene sentido seguir armando este pedido.
@@ -167,6 +189,12 @@ export async function applyActions(params: {
     }
 
     if (action.type === "confirm_order") {
+      if (!wasReadyToConfirmBeforeThisTurn) {
+        correctionNotes.push(
+          "¡Ya tengo todos los datos de tu pedido! Fijate el resumen y confirmámelo en tu próximo mensaje para registrarlo.",
+        );
+        continue;
+      }
       if (itemsChangedThisTurn) {
         correctionNotes.push(
           "Antes de confirmar, actualicé tu pedido con el cambio que me pediste. Fijate que quedó bien y confirmame de nuevo para registrarlo.",

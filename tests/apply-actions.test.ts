@@ -274,3 +274,125 @@ describe("applyActions — un pedido nuevo nunca hereda ítems de uno previo ya 
     ]);
   });
 });
+
+// Regresión del bug encontrado probando la Fase 4 en vivo: un cliente real
+// confirmó un pedido completo varias veces y el sistema nunca lo registró
+// porque la IA no incluía confirm_order pese a decir que sí. Reforzar el
+// prompt no alcanzó del todo — acá se prueba la defensa de código: no
+// alcanza con que el pedido esté completo, tiene que haber estado completo
+// ANTES de este turno (la confirmación tiene que ser un mensaje aparte del
+// que completó el último dato).
+describe("applyActions — confirm_order exige un turno aparte del que completó el pedido", () => {
+  const companiesToCleanup: string[] = [];
+
+  afterAll(async () => {
+    for (const companyId of companiesToCleanup) await cleanupCompany(companyId);
+  });
+
+  it("no confirma si el pedido recién se completó en este mismo turno", async () => {
+    const { company, branch } = await createTestCompanyAndBranch();
+    companiesToCleanup.push(company.id);
+    const product = await prisma.product.create({
+      data: { companyId: company.id, branchId: branch.id, name: "Chipa", priceCents: 300000 },
+    });
+    await prisma.paymentMethodConfig.create({
+      data: { companyId: company.id, branchId: branch.id, cashEnabled: true, transferEnabled: false },
+    });
+    const conversation = await prisma.conversation.create({
+      data: { companyId: company.id, branchId: branch.id, customerPhone: "5491100000005" },
+    });
+
+    // Draft incompleto (falta medio de pago) al empezar el turno — el
+    // cliente lo completa Y la IA (de más) intenta confirmar en el mismo mensaje.
+    const draftMissingPayment = {
+      items: [{ productId: product.id, productName: product.name, unitPriceCents: product.priceCents, quantity: 5 }],
+      customerName: "Cliente Test",
+      deliveryAddressRaw: "Calle Falsa 123",
+      deliveryLatitude: -34.6,
+      deliveryLongitude: -58.38,
+    };
+
+    const result = await applyActions({
+      companyId: company.id,
+      branchId: branch.id,
+      conversationId: conversation.id,
+      customerPhone: "5491100000005",
+      draft: draftMissingPayment,
+      actions: [{ type: "set_payment_method", method: "CASH" }, { type: "confirm_order" }],
+    });
+
+    expect(result.orderCreated).toBe(false);
+    expect(result.draft.paymentMethod).toBe("CASH");
+    const orders = await prisma.order.findMany({ where: { branchId: branch.id } });
+    expect(orders).toHaveLength(0);
+
+    // En el turno SIGUIENTE, con el pedido ya completo desde el arranque, sí confirma.
+    const secondResult = await applyActions({
+      companyId: company.id,
+      branchId: branch.id,
+      conversationId: conversation.id,
+      customerPhone: "5491100000005",
+      draft: result.draft,
+      actions: [{ type: "confirm_order" }],
+    });
+    expect(secondResult.orderCreated).toBe(true);
+  });
+});
+
+// Regresión: la IA reemite set_customer_info con la misma dirección (a
+// veces redactada un poco distinto) casi cada vez que resume el pedido —
+// sin este fix, cada repetición volvía a mandar "Anoté tu domicilio
+// como...", generando spam. Se compara por coordenadas, no por texto.
+describe("applyActions — no repite la confirmación de domicilio si sigue siendo el mismo lugar", () => {
+  const companiesToCleanup: string[] = [];
+
+  afterAll(async () => {
+    for (const companyId of companiesToCleanup) await cleanupCompany(companyId);
+  });
+
+  it("no vuelve a mandar el aviso de domicilio si la nueva geocodificación cae muy cerca de la anterior", async () => {
+    const { company, branch } = await createTestCompanyAndBranch();
+    companiesToCleanup.push(company.id);
+    await prisma.deliveryZone.create({
+      data: { companyId: company.id, branchId: branch.id, centerLatitude: -34.6083, centerLongitude: -58.3712, radiusKm: 5 },
+    });
+    const conversation = await prisma.conversation.create({
+      data: { companyId: company.id, branchId: branch.id, customerPhone: "5491100000006" },
+    });
+
+    geocodeAddressMock.mockResolvedValueOnce({
+      latitude: -34.61,
+      longitude: -58.3745,
+      formattedAddress: "Av. de Mayo 700, CABA",
+      partialMatch: false,
+      fromCache: false,
+    });
+    const first = await applyActions({
+      companyId: company.id,
+      branchId: branch.id,
+      conversationId: conversation.id,
+      customerPhone: "5491100000006",
+      draft: EMPTY_DRAFT_ORDER,
+      actions: [{ type: "set_customer_info", address: "Av. de Mayo 700, entre Perón y Bolívar" }],
+    });
+    expect(first.extras.some((extra) => extra.kind === "text" && extra.text.includes("Anoté tu domicilio"))).toBe(true);
+
+    // Mismo lugar (coordenadas casi idénticas), redactado distinto.
+    geocodeAddressMock.mockResolvedValueOnce({
+      latitude: -34.6101,
+      longitude: -58.37455,
+      formattedAddress: "Av. de Mayo 700, CABA",
+      partialMatch: false,
+      fromCache: false,
+    });
+    const second = await applyActions({
+      companyId: company.id,
+      branchId: branch.id,
+      conversationId: conversation.id,
+      customerPhone: "5491100000006",
+      draft: first.draft,
+      actions: [{ type: "set_customer_info", address: "Av. de Mayo 700" }],
+    });
+    expect(second.extras.some((extra) => extra.kind === "text" && extra.text.includes("Anoté tu domicilio"))).toBe(false);
+  });
+});

@@ -9,9 +9,10 @@ import { buildEngineSystemPrompt } from "@/lib/orders/engine-prompt";
 import { applyActions, type OutboundExtra } from "@/lib/orders/apply-actions";
 import { runAiTask } from "@/lib/ai/run-ai-task";
 import { extractJsonBlock, type LlmMessage } from "@/lib/ai/provider";
-import { draftOrderStateSchema, llmTurnResponseSchema, EMPTY_DRAFT_ORDER, type DraftOrderState } from "@/lib/validations/order-engine";
+import { draftOrderStateSchema, llmTurnResponseSchema, EMPTY_DRAFT_ORDER } from "@/lib/validations/order-engine";
 import { buildRequiresHumanMessage } from "@/lib/orders/messages";
 import { scheduleConversationExpiry } from "@/lib/jobs/queues";
+import { computeCurrentStep } from "@/lib/orders/draft-step";
 import type { Message } from "@prisma/client";
 
 const HISTORY_LENGTH = 12;
@@ -126,6 +127,15 @@ export async function processInboundMessage(params: { conversationId: string; me
     ? draftOrderStateSchema.parse(conversation.draftOrder)
     : EMPTY_DRAFT_ORDER;
 
+  // El nombre de perfil de WhatsApp (Message/Conversation.customerName) es un
+  // dato ya confiable que llega solo con el primer mensaje — no depende de
+  // que la IA se lo pida al cliente y lo capture bien. Si todavía no hay un
+  // nombre puesto para el pedido, se usa como default (el cliente puede
+  // pedir otro nombre distinto para la entrega, la IA lo puede pisar).
+  if (!draft.customerName && conversation.customerName) {
+    draft.customerName = conversation.customerName;
+  }
+
   const { system } = await buildEngineSystemPrompt({
     branchId: conversation.branchId,
     customerPhone: conversation.customerPhone,
@@ -200,13 +210,4 @@ export async function processInboundMessage(params: { conversationId: string; me
       lastMessageAt: conversation.lastMessageAt,
     });
   }
-}
-
-function computeCurrentStep(draft: DraftOrderState): string | null {
-  if (draft.items.length === 0 && !draft.customerName && !draft.deliveryAddressRaw && !draft.paymentMethod) {
-    return null;
-  }
-  if (!draft.customerName || !draft.deliveryAddressRaw) return "ASKING_DELIVERY_INFO";
-  if (!draft.paymentMethod) return "ASKING_PAYMENT_METHOD";
-  return "CONFIRMING";
 }
