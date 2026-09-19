@@ -378,6 +378,55 @@ describe("applyActions — confirm_order exige un turno aparte del que completó
   });
 });
 
+// Regresión de un caso real: la IA le mostró al cliente un resumen del
+// pedido (productos, total, medio de pago) y le pidió confirmar SIN haberle
+// pedido nunca el domicilio de entrega — el pedido en realidad nunca estuvo
+// completo. Con el mensaje genérico anterior ("¡Ya tengo todos los datos!"),
+// el cliente confirmaba una y otra vez sin enterarse de que faltaba algo.
+// Ahora el mensaje de bloqueo nombra el dato puntual que falta.
+describe("applyActions — el mensaje de confirmación bloqueada dice qué falta de verdad", () => {
+  const companiesToCleanup: string[] = [];
+
+  afterAll(async () => {
+    for (const companyId of companiesToCleanup) await cleanupCompany(companyId);
+  });
+
+  it("avisa que falta el domicilio en vez de decir que ya tiene todos los datos", async () => {
+    const { company, branch } = await createTestCompanyAndBranch();
+    companiesToCleanup.push(company.id);
+    const product = await prisma.product.create({
+      data: { companyId: company.id, branchId: branch.id, name: "Empanada de carne", priceCents: 60000 },
+    });
+    await prisma.paymentMethodConfig.create({
+      data: { companyId: company.id, branchId: branch.id, cashEnabled: true, transferEnabled: true },
+    });
+    const conversation = await prisma.conversation.create({
+      data: { companyId: company.id, branchId: branch.id, customerPhone: "5491100000010" },
+    });
+
+    // El pedido tiene productos, nombre y medio de pago, pero NUNCA se
+    // cargó el domicilio — igual que en el caso real reportado.
+    const draftMissingAddress = {
+      items: [{ productId: product.id, productName: product.name, unitPriceCents: product.priceCents, quantity: 1 }],
+      customerName: "Estefanía",
+      paymentMethod: "TRANSFER" as const,
+    };
+
+    const result = await applyActions({
+      companyId: company.id,
+      branchId: branch.id,
+      conversationId: conversation.id,
+      customerPhone: "5491100000010",
+      draft: draftMissingAddress,
+      actions: [{ type: "confirm_order" }],
+    });
+
+    expect(result.orderCreated).toBe(false);
+    expect(result.correctionNotes.some((note) => note.includes("tu domicilio de entrega"))).toBe(true);
+    expect(result.correctionNotes.some((note) => note.includes("Ya tengo todos los datos"))).toBe(false);
+  });
+});
+
 // Regresión del bug más grave reportado en la Fase 4: un cliente confirmó un
 // pedido completo TRES veces seguidas ("Si ya abone" → "Ok" → "Confirmo el
 // pedido") y el sistema nunca lo registró — cada intento chocaba con la

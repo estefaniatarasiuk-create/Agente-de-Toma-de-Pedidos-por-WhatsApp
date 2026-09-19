@@ -98,7 +98,11 @@ empujando la conversación al siguiente paso. Después de agregar un producto, e
 si quiere algo más O directamente seguí pidiendo lo próximo que falte, en este orden: 1) productos, 2)
 nombre y domicilio de entrega (con entrecalles), 3) medio de pago (de los habilitados), 4) resumen completo
 del pedido pidiendo confirmación explícita antes de usar "confirm_order". No pases al siguiente paso hasta
-tener el actual, pero tampoco te quedes callada esperando: siempre proponé qué dato falta pedir.`;
+tener el actual, pero tampoco te quedes callada esperando: siempre proponé qué dato falta pedir.
+MUY IMPORTANTE: nunca le muestres al cliente un "resumen" del pedido pidiéndole que confirme si en "Estado
+actual del pedido" de abajo todavía falta el nombre, el domicilio, o el medio de pago — eso lo confunde
+(le hace pensar que ya está todo listo cuando en realidad falta algo). Revisá siempre esa sección antes de
+armar un resumen: si falta algo, pedíselo primero.`;
 
 export async function buildEngineSystemPrompt(params: {
   branchId: string;

@@ -5,7 +5,7 @@ import { validateDeliveryAddress } from "@/lib/orders/zone-validation";
 import { distanceKm } from "@/lib/geocoding";
 import { parsePriceToCents } from "@/lib/validations/product";
 import { createOrderFromDraft } from "@/lib/orders/create-order";
-import { computeCurrentStep } from "@/lib/orders/draft-step";
+import { computeCurrentStep, getMissingOrderFields, MISSING_FIELD_LABEL } from "@/lib/orders/draft-step";
 import {
   buildAmbiguousAddressMessage,
   buildGeocodingUnavailableMessage,
@@ -25,13 +25,6 @@ export type ApplyActionsResult = {
   extras: OutboundExtra[];
   requiresHuman: boolean;
   orderCreated: boolean;
-};
-
-const MISSING_FIELD_LABEL: Record<string, string> = {
-  productos: "los productos que querés pedir",
-  nombre: "tu nombre",
-  "domicilio validado": "tu domicilio de entrega",
-  "medio de pago": "cómo vas a pagar",
 };
 
 export async function applyActions(params: {
@@ -215,11 +208,24 @@ export async function applyActions(params: {
           );
           return { draft, correctionNotes, extras, requiresHuman: true, orderCreated: false };
         }
-        correctionNotes.push(
-          !wasReadyToConfirmBeforeThisTurn
-            ? "¡Ya tengo todos los datos de tu pedido! Fijate el resumen y confirmámelo en tu próximo mensaje para registrarlo."
-            : "Antes de confirmar, actualicé tu pedido con el cambio que me pediste. Fijate que quedó bien y confirmame de nuevo para registrarlo.",
-        );
+        if (draftChangedThisTurn) {
+          correctionNotes.push(
+            "Antes de confirmar, actualicé tu pedido con el cambio que me pediste. Fijate que quedó bien y confirmame de nuevo para registrarlo.",
+          );
+        } else {
+          // El mensaje genérico "ya tengo todos los datos" es engañoso si en
+          // realidad todavía falta algo (ej. la IA saltó el paso de pedir el
+          // domicilio y mostró un resumen incompleto como si estuviera
+          // completo) — en ese caso el cliente confirma una y otra vez sin
+          // saber qué falta de verdad. Si hay campos faltantes, se los
+          // decimos explícitamente en vez del mensaje genérico.
+          const missing = getMissingOrderFields(draft);
+          correctionNotes.push(
+            missing.length > 0
+              ? `Todavía me falta ${missing.map((field) => MISSING_FIELD_LABEL[field] ?? field).join(", ")} para poder confirmar el pedido.`
+              : "¡Ya tengo todos los datos de tu pedido! Fijate el resumen y confirmámelo en tu próximo mensaje para registrarlo.",
+          );
+        }
         continue;
       }
 

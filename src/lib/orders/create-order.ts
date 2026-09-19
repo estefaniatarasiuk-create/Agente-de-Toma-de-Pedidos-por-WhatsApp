@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import type { Order } from "@prisma/client";
 import type { DraftOrderState } from "@/lib/validations/order-engine";
 import { scheduleReceiptJobs } from "@/lib/jobs/queues";
+import { getMissingOrderFields } from "@/lib/orders/draft-step";
 
 export type CreateOrderResult =
   | { status: "created"; order: Order; totalCents: number; changeAmountCents: number | null }
@@ -22,11 +23,7 @@ export async function createOrderFromDraft(params: {
 }): Promise<CreateOrderResult> {
   const { draft, companyId, branchId, conversationId, customerPhone } = params;
 
-  const missing: string[] = [];
-  if (draft.items.length === 0) missing.push("productos");
-  if (!draft.customerName) missing.push("nombre");
-  if (!draft.deliveryAddressRaw || draft.deliveryLatitude === undefined) missing.push("domicilio validado");
-  if (!draft.paymentMethod) missing.push("medio de pago");
+  const missing = getMissingOrderFields(draft);
   if (missing.length > 0) return { status: "missing_info", missing };
 
   const products = await prisma.product.findMany({
