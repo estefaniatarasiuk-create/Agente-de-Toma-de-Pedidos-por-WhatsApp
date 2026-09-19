@@ -50,6 +50,14 @@ export async function applyActions(params: {
   // configurada): no podemos confiar en la regla dura de zona, así que se
   // deriva a un humano en vez de seguir como si no hubiera pasado nada.
   let requiresHumanForTechnicalFailure = false;
+  // Nunca se confirma un pedido en el mismo turno en que se modificaron los
+  // ítems (aunque la IA haya emitido confirm_order igual): en pruebas reales
+  // el modelo a veces reemite un add_item de algo que ya estaba en el
+  // pedido justo al confirmar (al "resumirlo" en su reply), duplicando la
+  // cantidad — el cliente terminaba viendo un total el doble del acordado.
+  // Es más seguro pedirle una confirmación aparte, sin cambios en el mismo
+  // mensaje, que confiar en que el modelo nunca vuelva a hacer esto.
+  let itemsChangedThisTurn = false;
 
   // Si el cliente pide hablar con una persona, eso manda por sobre
   // cualquier otra cosa que la IA haya intentado hacer en el mismo turno.
@@ -80,12 +88,14 @@ export async function applyActions(params: {
           quantity: action.quantity,
         });
       }
+      itemsChangedThisTurn = true;
       continue;
     }
 
     if (action.type === "remove_item") {
       const normalizedQuery = action.productName.trim().toLowerCase();
       draft.items = draft.items.filter((item) => item.productName.toLowerCase() !== normalizedQuery);
+      itemsChangedThisTurn = true;
       continue;
     }
 
@@ -136,6 +146,13 @@ export async function applyActions(params: {
     }
 
     if (action.type === "confirm_order") {
+      if (itemsChangedThisTurn) {
+        correctionNotes.push(
+          "Antes de confirmar, actualicé tu pedido con el cambio que me pediste. Fijate que quedó bien y confirmame de nuevo para registrarlo.",
+        );
+        continue;
+      }
+
       const result = await createOrderFromDraft({
         companyId: params.companyId,
         branchId: params.branchId,

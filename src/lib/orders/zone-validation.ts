@@ -25,7 +25,11 @@ export async function validateDeliveryAddress(
   // pasó, así que esto nunca deja de responder por una excepción sin capturar.
   let geocoded;
   try {
-    geocoded = await geocodeAddress(rawAddress);
+    geocoded = await geocodeAddress(rawAddress, {
+      latitude: zone.centerLatitude,
+      longitude: zone.centerLongitude,
+      radiusKm: zone.radiusKm,
+    });
   } catch (error) {
     console.error("Error geocodificando domicilio:", error);
     return { status: "geocoding_unavailable" };

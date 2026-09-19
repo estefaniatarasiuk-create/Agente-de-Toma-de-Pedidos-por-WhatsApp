@@ -63,3 +63,98 @@ describe("applyActions — set_customer_info fuera de zona", () => {
     expect(result.orderCreated).toBe(false);
   });
 });
+
+// Regresión del bug encontrado probando la Fase 3 en vivo: la IA a veces
+// reemite un add_item de un producto que ya estaba en el pedido justo en el
+// mismo mensaje donde confirma (al "resumirlo" en su reply), duplicando la
+// cantidad — el cliente terminó viendo el doble del total acordado. La
+// defensa es de código, no solo de prompt: nunca se confirma un pedido en
+// el mismo turno en que se modificaron los ítems.
+describe("applyActions — nunca confirma en el mismo turno en que se tocan los ítems", () => {
+  const companiesToCleanup: string[] = [];
+
+  afterAll(async () => {
+    for (const companyId of companiesToCleanup) await cleanupCompany(companyId);
+  });
+
+  it("no crea el pedido si confirm_order llega junto con un add_item del mismo turno", async () => {
+    const { company, branch } = await createTestCompanyAndBranch();
+    companiesToCleanup.push(company.id);
+
+    const product = await prisma.product.create({
+      data: { companyId: company.id, branchId: branch.id, name: "Chipa", priceCents: 300000 },
+    });
+    await prisma.paymentMethodConfig.create({
+      data: { companyId: company.id, branchId: branch.id, cashEnabled: true, transferEnabled: false },
+    });
+    const conversation = await prisma.conversation.create({
+      data: { companyId: company.id, branchId: branch.id, customerPhone: "5491100000001" },
+    });
+
+    const draft = {
+      items: [{ productId: product.id, productName: product.name, unitPriceCents: product.priceCents, quantity: 10 }],
+      customerName: "Cliente Test",
+      deliveryAddressRaw: "Calle Falsa 123",
+      deliveryLatitude: -34.6,
+      deliveryLongitude: -58.38,
+      paymentMethod: "CASH" as const,
+    };
+
+    const result = await applyActions({
+      companyId: company.id,
+      branchId: branch.id,
+      conversationId: conversation.id,
+      customerPhone: "5491100000001",
+      draft,
+      actions: [
+        { type: "add_item", productName: "Chipa", quantity: 10 },
+        { type: "confirm_order" },
+      ],
+    });
+
+    expect(result.orderCreated).toBe(false);
+    expect(result.draft.items[0].quantity).toBe(20);
+    expect(result.correctionNotes.some((note) => note.toLowerCase().includes("confirmame de nuevo"))).toBe(true);
+
+    const orders = await prisma.order.findMany({ where: { branchId: branch.id } });
+    expect(orders).toHaveLength(0);
+  });
+
+  it("sí crea el pedido cuando confirm_order llega solo, sin cambios de ítems en el mismo turno", async () => {
+    const { company, branch } = await createTestCompanyAndBranch();
+    companiesToCleanup.push(company.id);
+
+    const product = await prisma.product.create({
+      data: { companyId: company.id, branchId: branch.id, name: "Chipa", priceCents: 300000 },
+    });
+    await prisma.paymentMethodConfig.create({
+      data: { companyId: company.id, branchId: branch.id, cashEnabled: true, transferEnabled: false },
+    });
+    const conversation = await prisma.conversation.create({
+      data: { companyId: company.id, branchId: branch.id, customerPhone: "5491100000002" },
+    });
+
+    const draft = {
+      items: [{ productId: product.id, productName: product.name, unitPriceCents: product.priceCents, quantity: 10 }],
+      customerName: "Cliente Test",
+      deliveryAddressRaw: "Calle Falsa 123",
+      deliveryLatitude: -34.6,
+      deliveryLongitude: -58.38,
+      paymentMethod: "CASH" as const,
+    };
+
+    const result = await applyActions({
+      companyId: company.id,
+      branchId: branch.id,
+      conversationId: conversation.id,
+      customerPhone: "5491100000002",
+      draft,
+      actions: [{ type: "confirm_order" }],
+    });
+
+    expect(result.orderCreated).toBe(true);
+    const orders = await prisma.order.findMany({ where: { branchId: branch.id } });
+    expect(orders).toHaveLength(1);
+    expect(orders[0].totalCents).toBe(3000000);
+  });
+});

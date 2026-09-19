@@ -47,10 +47,17 @@ type GoogleGeocodeResponse = {
   }>;
 };
 
+// Sesgo de ubicación opcional (centro de la zona de entrega + su radio):
+// Argentina tiene muchísimas calles con el mismo nombre en localidades
+// distintas, así que sin esto Google puede devolver una coincidencia
+// "válida" pero en la ciudad equivocada — con el sesgo prioriza resultados
+// cerca del local, que es lo que casi siempre corresponde para un pedido.
+export type GeocodeBias = { latitude: number; longitude: number; radiusKm: number };
+
 // Busca primero en la base propia (AddressCache); si no está, geocodifica
 // con Google Maps y guarda el resultado para futuras consultas (optimiza
 // costo y tiempo de respuesta, tal como pide la spec).
-export async function geocodeAddress(rawAddress: string): Promise<GeocodeResult | null> {
+export async function geocodeAddress(rawAddress: string, bias?: GeocodeBias): Promise<GeocodeResult | null> {
   const normalizedAddress = normalizeAddress(rawAddress);
 
   const cached = await prisma.addressCache.findUnique({ where: { normalizedAddress } });
@@ -71,6 +78,19 @@ export async function geocodeAddress(rawAddress: string): Promise<GeocodeResult 
   url.searchParams.set("address", rawAddress);
   url.searchParams.set("region", "ar");
   url.searchParams.set("components", "country:AR");
+  if (bias) {
+    // El parámetro de sesgo de la Geocoding API es "bounds" (una caja,
+    // no location+radius como en otras APIs de Maps): dos esquinas
+    // lat/lng. 1° de latitud ≈ 111km; la longitud se ajusta por el coseno
+    // de la latitud, ya que los meridianos se acercan hacia los polos.
+    const latDelta = bias.radiusKm / 111;
+    const lngDelta = bias.radiusKm / (111 * Math.cos((bias.latitude * Math.PI) / 180));
+    const south = bias.latitude - latDelta;
+    const west = bias.longitude - lngDelta;
+    const north = bias.latitude + latDelta;
+    const east = bias.longitude + lngDelta;
+    url.searchParams.set("bounds", `${south},${west}|${north},${east}`);
+  }
   url.searchParams.set("key", apiKey);
 
   const response = await fetch(url.toString());
