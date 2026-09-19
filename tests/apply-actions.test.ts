@@ -64,20 +64,27 @@ describe("applyActions — set_customer_info fuera de zona", () => {
   });
 });
 
-// Regresión del bug encontrado probando la Fase 3 en vivo: la IA a veces
-// reemite un add_item de un producto que ya estaba en el pedido justo en el
-// mismo mensaje donde confirma (al "resumirlo" en su reply), duplicando la
-// cantidad — el cliente terminó viendo el doble del total acordado. La
-// defensa es de código, no solo de prompt: nunca se confirma un pedido en
-// el mismo turno en que se modificaron los ítems.
-describe("applyActions — nunca confirma en el mismo turno en que se tocan los ítems", () => {
+// Regresiones de dos bugs encontrados probando la Fase 3 en vivo con un
+// pedido real de punta a punta:
+//
+// 1. "quantity" de add_item se FIJA (no se suma) al total ya existente. La
+//    IA reemite la acción todo el tiempo al restatear el pedido (al
+//    confirmarlo, agradecer, o retomar la conversación) — con semántica de
+//    "sumar", cada repetición duplicaba/triplicaba la cantidad real (un
+//    pedido de 9 Chipa terminó facturando 27). Con semántica de "fijar",
+//    repetir el mismo total no hace nada.
+// 2. Como defensa adicional, nunca se confirma un pedido en el mismo turno
+//    en que la cantidad de algún ítem CAMBIÓ de verdad (no alcanza con que
+//    la acción add_item esté presente: si fija el mismo total que ya
+//    había, no cuenta como cambio).
+describe("applyActions — add_item fija el total, no lo suma, y protege la confirmación", () => {
   const companiesToCleanup: string[] = [];
 
   afterAll(async () => {
     for (const companyId of companiesToCleanup) await cleanupCompany(companyId);
   });
 
-  it("no crea el pedido si confirm_order llega junto con un add_item del mismo turno", async () => {
+  it("no crea el pedido si confirm_order llega junto con un cambio real de cantidad, y no lo suma sobre lo anterior", async () => {
     const { company, branch } = await createTestCompanyAndBranch();
     companiesToCleanup.push(company.id);
 
@@ -100,6 +107,7 @@ describe("applyActions — nunca confirma en el mismo turno en que se tocan los 
       paymentMethod: "CASH" as const,
     };
 
+    // El modelo manda 15 como el nuevo total (no como "sumale 15 más").
     const result = await applyActions({
       companyId: company.id,
       branchId: branch.id,
@@ -107,17 +115,60 @@ describe("applyActions — nunca confirma en el mismo turno en que se tocan los 
       customerPhone: "5491100000001",
       draft,
       actions: [
-        { type: "add_item", productName: "Chipa", quantity: 10 },
+        { type: "add_item", productName: "Chipa", quantity: 15 },
         { type: "confirm_order" },
       ],
     });
 
     expect(result.orderCreated).toBe(false);
-    expect(result.draft.items[0].quantity).toBe(20);
+    expect(result.draft.items[0].quantity).toBe(15);
     expect(result.correctionNotes.some((note) => note.toLowerCase().includes("confirmame de nuevo"))).toBe(true);
 
     const orders = await prisma.order.findMany({ where: { branchId: branch.id } });
     expect(orders).toHaveLength(0);
+  });
+
+  it("sí crea el pedido si add_item repite el mismo total ya existente junto con confirm_order (no es un cambio real)", async () => {
+    const { company, branch } = await createTestCompanyAndBranch();
+    companiesToCleanup.push(company.id);
+
+    const product = await prisma.product.create({
+      data: { companyId: company.id, branchId: branch.id, name: "Chipa", priceCents: 300000 },
+    });
+    await prisma.paymentMethodConfig.create({
+      data: { companyId: company.id, branchId: branch.id, cashEnabled: true, transferEnabled: false },
+    });
+    const conversation = await prisma.conversation.create({
+      data: { companyId: company.id, branchId: branch.id, customerPhone: "5491100000003" },
+    });
+
+    const draft = {
+      items: [{ productId: product.id, productName: product.name, unitPriceCents: product.priceCents, quantity: 9 }],
+      customerName: "Cliente Test",
+      deliveryAddressRaw: "Calle Falsa 123",
+      deliveryLatitude: -34.6,
+      deliveryLongitude: -58.38,
+      paymentMethod: "CASH" as const,
+    };
+
+    // El modelo "restatea" el pedido (mismo total: 9) en el mismo turno
+    // donde confirma — no tiene que bloquearse ni duplicar la cantidad.
+    const result = await applyActions({
+      companyId: company.id,
+      branchId: branch.id,
+      conversationId: conversation.id,
+      customerPhone: "5491100000003",
+      draft,
+      actions: [
+        { type: "add_item", productName: "Chipa", quantity: 9 },
+        { type: "confirm_order" },
+      ],
+    });
+
+    expect(result.orderCreated).toBe(true);
+    const orders = await prisma.order.findMany({ where: { branchId: branch.id } });
+    expect(orders).toHaveLength(1);
+    expect(orders[0].totalCents).toBe(2700000);
   });
 
   it("sí crea el pedido cuando confirm_order llega solo, sin cambios de ítems en el mismo turno", async () => {

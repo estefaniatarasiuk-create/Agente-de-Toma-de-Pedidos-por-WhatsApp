@@ -77,9 +77,15 @@ export async function applyActions(params: {
         correctionNotes.push(`No tenemos "${action.productName}" en el menú.${suggestion}`);
         continue;
       }
+      // "quantity" es la cantidad TOTAL deseada de ese producto (no un
+      // incremento — ver la instrucción en engine-prompt.ts): fijarla en
+      // vez de sumarla hace que, si el modelo repite la misma acción por
+      // las dudas en otro turno (algo que pasa seguido en la práctica),
+      // no infle el pedido — fijar el mismo número de nuevo es un no-op.
       const existing = draft.items.find((item) => item.productId === product.id);
       if (existing) {
-        existing.quantity += action.quantity;
+        if (existing.quantity !== action.quantity) itemsChangedThisTurn = true;
+        existing.quantity = action.quantity;
       } else {
         draft.items.push({
           productId: product.id,
@@ -87,15 +93,16 @@ export async function applyActions(params: {
           unitPriceCents: product.priceCents,
           quantity: action.quantity,
         });
+        itemsChangedThisTurn = true;
       }
-      itemsChangedThisTurn = true;
       continue;
     }
 
     if (action.type === "remove_item") {
       const normalizedQuery = action.productName.trim().toLowerCase();
+      const itemCountBefore = draft.items.length;
       draft.items = draft.items.filter((item) => item.productName.toLowerCase() !== normalizedQuery);
-      itemsChangedThisTurn = true;
+      if (draft.items.length !== itemCountBefore) itemsChangedThisTurn = true;
       continue;
     }
 

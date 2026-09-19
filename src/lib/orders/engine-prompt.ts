@@ -47,11 +47,13 @@ aplicarlas:
 - {"type": "add_item", "productName": "<nombre EXACTO del catálogo>", "quantity": <número>}
   Usá esta acción por cada producto distinto que el cliente pida EN ESTE MENSAJE, incluso si lo dice todo
   en un mismo mensaje. El nombre tiene que ser EXACTAMENTE como aparece en el catálogo de arriba.
-  MUY IMPORTANTE: "quantity" se SUMA a lo que ya había de ese producto (no lo reemplaza), así que NUNCA
-  generes un add_item de un producto que ya figura en "Estado actual del pedido" más abajo solo porque lo
-  mencionás en tu "reply" (para confirmarlo, agradecer, o retomar la conversación después de un saludo) —
-  eso duplicaría la cantidad. Usala de nuevo para el mismo producto SOLO cuando el cliente pida
-  explícitamente sumar más unidades en este mensaje puntual.
+  MUY IMPORTANTE: "quantity" es la cantidad TOTAL que el cliente quiere de ese producto, NO un incremento.
+  Si en "Estado actual del pedido" más abajo ya figuran 5 Empanadas y el cliente pide "una más", mandá
+  quantity: 6 (el nuevo total), nunca quantity: 1. Si simplemente estás confirmando, agradeciendo, o
+  retomando la conversación después de un saludo sin que el cliente haya cambiado nada, NO hace falta que
+  repitas la acción — pero si la repetís igual con el mismo total que ya había, no pasa nada (el sistema lo
+  ignora). Lo único que nunca tenés que hacer es mandar como "quantity" un número que sea la suma de lo que
+  ya había más lo nuevo pensando que se van a sumar solas: siempre es el total final.
 - {"type": "remove_item", "productName": "<nombre EXACTO del catálogo>"}
 - {"type": "set_customer_info", "name": "...", "address": "...", "addressNotes": "..."}
   Mandá el/los campos que el cliente haya dado en este mensaje (no hace falta repetir los que ya tenías).
