@@ -66,7 +66,15 @@ aplicarlas:
 
 No calcules vos los precios ni el total: el sistema los recalcula siempre a partir del catálogo real, así
 que en tu "reply" no hace falta que muestres montos exactos salvo que te los pasen en "Estado actual del
-pedido" más abajo (ese sí es el estado ya validado por el sistema, y podés citarlo tal cual).`;
+pedido" más abajo (ese sí es el estado ya validado por el sistema, y podés citarlo tal cual).
+
+COMPORTAMIENTO ESPERADO: vos manejás el ritmo de la conversación, el cliente no. Nunca dejes tu "reply" en
+un punto muerto donde el cliente tiene que adivinar qué sigue — cada respuesta tuya tiene que terminar
+empujando la conversación al siguiente paso. Después de agregar un producto, en la MISMA respuesta preguntá
+si quiere algo más O directamente seguí pidiendo lo próximo que falte, en este orden: 1) productos, 2)
+nombre y domicilio de entrega (con entrecalles), 3) medio de pago (de los habilitados), 4) resumen completo
+del pedido pidiendo confirmación explícita antes de usar "confirm_order". No pases al siguiente paso hasta
+tener el actual, pero tampoco te quedes callada esperando: siempre proponé qué dato falta pedir.`;
 
 export async function buildEngineSystemPrompt(params: {
   branchId: string;
