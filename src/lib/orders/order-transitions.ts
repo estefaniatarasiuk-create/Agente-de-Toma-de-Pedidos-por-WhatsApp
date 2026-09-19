@@ -1,0 +1,151 @@
+import { prisma } from "@/lib/prisma";
+import { sendOutboundText } from "@/lib/whatsapp/outbound";
+import {
+  buildOrderCancelledByCompanyMessage,
+  buildOrderDeliveredMessage,
+  buildOrderOnTheWayMessage,
+  buildPaymentValidatedMessage,
+} from "@/lib/orders/messages";
+import type { Order, OrderStatus } from "@prisma/client";
+
+// Único lugar que mueve el estado de un pedido desde el tablero de
+// operación (Fase 4): humano, no IA — cada cambio queda en
+// OrderStatusEvent con changedByAI: false para la trazabilidad IA vs.
+// humano (objetivo de negocio §4.3).
+const NEXT_STATUS: Partial<Record<OrderStatus, OrderStatus>> = {
+  PENDING: "PREPARING",
+  PREPARING: "ON_THE_WAY",
+  ON_THE_WAY: "DELIVERED",
+};
+
+export type OrderTransitionResult =
+  | { status: "ok"; order: Order }
+  | { status: "invalid_transition" }
+  | { status: "not_found" };
+
+async function notifyCustomer(order: Order, userId: string, text: string): Promise<void> {
+  // Un pedido puede quedar sin conversación asociada (ej. si se borró) —
+  // en ese caso no hay a quién mandarle el WhatsApp, seguimos igual.
+  if (!order.conversationId) return;
+  const line = await prisma.whatsAppLine.findUnique({ where: { branchId: order.branchId } });
+  await sendOutboundText({
+    companyId: order.companyId,
+    branchId: order.branchId,
+    conversationId: order.conversationId,
+    customerPhone: order.customerPhone,
+    line,
+    text,
+    sentByUserId: userId,
+  });
+}
+
+export async function advanceOrderStatus(params: {
+  branchId: string;
+  orderId: string;
+  userId: string;
+}): Promise<OrderTransitionResult> {
+  const order = await prisma.order.findFirst({ where: { id: params.orderId, branchId: params.branchId } });
+  if (!order) return { status: "not_found" };
+
+  const nextStatus = NEXT_STATUS[order.status];
+  if (!nextStatus) return { status: "invalid_transition" };
+
+  const updated = await prisma.order.update({
+    where: { id: order.id },
+    data: {
+      status: nextStatus,
+      isDelayed: false,
+      deliveredAt: nextStatus === "DELIVERED" ? new Date() : undefined,
+    },
+  });
+  await prisma.orderStatusEvent.create({
+    data: {
+      companyId: order.companyId,
+      branchId: order.branchId,
+      orderId: order.id,
+      fromStatus: order.status,
+      toStatus: nextStatus,
+      changedByUserId: params.userId,
+      changedByAI: false,
+    },
+  });
+
+  if (nextStatus === "ON_THE_WAY") await notifyCustomer(updated, params.userId, buildOrderOnTheWayMessage());
+  if (nextStatus === "DELIVERED") await notifyCustomer(updated, params.userId, buildOrderDeliveredMessage());
+
+  return { status: "ok", order: updated };
+}
+
+// Revisar y aceptar el comprobante de una transferencia (spec §3.4): pasa
+// el pedido de "esperando comprobante" a "pendiente de preparación", igual
+// que si hubiera sido en efectivo. Solo lo puede hacer una persona — nunca
+// se valida un pago automáticamente.
+export async function validateOrderPayment(params: {
+  branchId: string;
+  orderId: string;
+  userId: string;
+}): Promise<OrderTransitionResult> {
+  const order = await prisma.order.findFirst({ where: { id: params.orderId, branchId: params.branchId } });
+  if (!order) return { status: "not_found" };
+  if (order.status !== "WAITING_RECEIPT" || !order.receiptUrl) return { status: "invalid_transition" };
+
+  const updated = await prisma.order.update({
+    where: { id: order.id },
+    data: {
+      status: "PENDING",
+      paymentValidated: true,
+      paymentValidatedAt: new Date(),
+      paymentValidatedByUserId: params.userId,
+    },
+  });
+  await prisma.orderStatusEvent.create({
+    data: {
+      companyId: order.companyId,
+      branchId: order.branchId,
+      orderId: order.id,
+      fromStatus: "WAITING_RECEIPT",
+      toStatus: "PENDING",
+      changedByUserId: params.userId,
+      changedByAI: false,
+      reason: "Comprobante de transferencia validado manualmente.",
+    },
+  });
+  await notifyCustomer(updated, params.userId, buildPaymentValidatedMessage());
+
+  return { status: "ok", order: updated };
+}
+
+// Cancelación manual: a diferencia de la cancelación automática del
+// circuito de comprobante (que nunca actúa si ya hay receiptUrl), acá sí
+// se puede cancelar en cualquier estado no terminal — es una decisión de
+// una persona, no una regla dura del sistema.
+export async function cancelOrder(params: {
+  branchId: string;
+  orderId: string;
+  userId: string;
+  reason: string;
+}): Promise<OrderTransitionResult> {
+  const order = await prisma.order.findFirst({ where: { id: params.orderId, branchId: params.branchId } });
+  if (!order) return { status: "not_found" };
+  if (order.status === "DELIVERED" || order.status === "CANCELLED") return { status: "invalid_transition" };
+
+  const updated = await prisma.order.update({
+    where: { id: order.id },
+    data: { status: "CANCELLED", cancelledAt: new Date(), cancellationReason: params.reason, cancelledBy: "COMPANY" },
+  });
+  await prisma.orderStatusEvent.create({
+    data: {
+      companyId: order.companyId,
+      branchId: order.branchId,
+      orderId: order.id,
+      fromStatus: order.status,
+      toStatus: "CANCELLED",
+      changedByUserId: params.userId,
+      changedByAI: false,
+      reason: params.reason,
+    },
+  });
+  await notifyCustomer(updated, params.userId, buildOrderCancelledByCompanyMessage(params.reason));
+
+  return { status: "ok", order: updated };
+}

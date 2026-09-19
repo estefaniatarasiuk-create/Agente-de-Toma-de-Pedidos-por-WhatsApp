@@ -77,3 +77,21 @@ export function buildAutoCancelMessage(): string {
 export function buildConversationExpiredMessage(): string {
   return "Como pasó un rato sin novedades, cancelamos el pedido que estabas armando. ¡Escribinos cuando quieras y lo empezamos de nuevo!";
 }
+
+// Notificaciones de cambio de estado del pedido desde el tablero de
+// operación (Fase 4): las dispara una persona del local, no la IA.
+export function buildPaymentValidatedMessage(): string {
+  return "¡Recibimos y validamos tu comprobante! Ya pasamos tu pedido a preparación.";
+}
+
+export function buildOrderOnTheWayMessage(): string {
+  return "¡Tu pedido ya salió! En breve llega a tu domicilio.";
+}
+
+export function buildOrderDeliveredMessage(): string {
+  return "¡Tu pedido fue entregado! Gracias por tu compra 😊";
+}
+
+export function buildOrderCancelledByCompanyMessage(reason: string): string {
+  return `Tuvimos que cancelar tu pedido: ${reason}. Disculpá las molestias — si querés, podés hacer el pedido de nuevo.`;
+}

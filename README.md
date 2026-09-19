@@ -26,7 +26,7 @@ WhatsApp` (ver historias de usuario E1–E11).
 - [x] **Fase 1** — Configuración del negocio (catálogo, horarios, zona, IA, medios de pago).
 - [x] **Fase 2** — Vinculación de WhatsApp (Embedded Signup, webhooks).
 - [x] **Fase 3** — Motor de pedidos (máquina de estados, IA, comprobante, worker de BullMQ).
-- [ ] Fase 4 — Operación (tablero, conversaciones en vivo).
+- [x] **Fase 4** — Operación (tablero de pedidos, conversaciones en vivo).
 - [ ] Fase 5 — Métricas y cierre.
 
 ## Setup
@@ -257,6 +257,51 @@ Fase 2):
    `REQUIRES_ATTENTION` y deja de responder automáticamente (Fase 4 le
    devuelve el control a un humano).
 
+### Verificación de la Fase 4
+
+**Pedidos** (`/pedidos`): tablero con una columna por estado (esperando
+comprobante, pendiente, en preparación, en camino, entregado, cancelado).
+Al llegar un pedido real por WhatsApp (Fase 3), tiene que aparecer solo en
+la columna que corresponda.
+
+1. Hacé clic en un pedido → se abre el detalle: productos, total, domicilio,
+   medio de pago, y el historial de cambios de estado.
+2. Pedido en efectivo (`PENDING`) → botón "Pasar a preparación" → "Marcar
+   en camino" → "Marcar entregado". En cada paso a "en camino" o
+   "entregado" el cliente recibe un WhatsApp avisándole (podés confirmarlo
+   viendo la conversación en `/conversaciones` o en su celular si es una
+   prueba real).
+3. Pedido por transferencia (`WAITING_RECEIPT`) sin comprobante todavía →
+   no hay botón de avanzar, solo un aviso de que se está esperando. Una vez
+   que el cliente manda la foto del comprobante (se adjunta solo, Fase 3),
+   aparece la imagen en el detalle y el botón "Validar comprobante y pasar
+   a preparación" — al usarlo, queda registrado quién lo validó
+   (`paymentValidatedByUserId`) y el cliente recibe el aviso.
+4. Botón "Cancelar pedido" (disponible en cualquier estado no terminal) →
+   pide un motivo → el pedido pasa a `CANCELLED` con `cancelledBy: COMPANY`
+   y el cliente recibe el motivo por WhatsApp. A diferencia de la
+   cancelación automática del circuito de comprobante (que nunca cancela
+   si ya hay `receiptUrl`), esta cancelación manual sí puede hacerse en
+   cualquier momento — es una decisión de una persona, no una regla dura.
+
+**Conversaciones** (`/conversaciones`): lista de conversaciones a la
+izquierda (las que están en `REQUIRES_ATTENTION` aparecen primero), chat
+completo a la derecha.
+
+1. Una conversación en `REQUIRES_ATTENTION` (por ejemplo, después de que un
+   cliente pidió hablar con una persona, o de que falló algo técnico) se
+   puede responder escribiendo en el cuadro de texto — el mensaje se manda
+   de verdad por WhatsApp y queda marcado en el chat con tu nombre (no
+   "IA"). El botón **"Marcar resuelta (devolver a la IA)"** la vuelve a
+   `ACTIVE` para que el motor de pedidos retome el control automático.
+2. Botón **"Pausar IA"** en cualquier conversación activa → la IA deja de
+   responder sola (igual que `REQUIRES_ATTENTION`, pero elegido a
+   propósito por el local, no por una falla) hasta que se la reactive con
+   **"Reactivar IA"**.
+3. Mandar un mensaje manual no cambia el estado de la conversación por su
+   cuenta — es una decisión aparte, para no perder el control accidental
+   por escribir una vez.
+
 ## Pendientes de pulido (para el cierre, Fase 5)
 
 Detectados probando la Fase 1, decidimos no resolverlos todavía porque no
@@ -432,6 +477,22 @@ bloquean funcionalidad — quedan anotados para no perderlos:
   la borra al final (el borrado cascadea, ver schema); lo único que se
   mockea es `geocodeAddress` (llamaría a la API real de Google Maps y
   necesitaría una key en cada corrida de tests).
+- **Cancelación manual sin restricción, automática con regla dura.** El
+  circuito de comprobante (Fase 3) nunca cancela solo si ya hay
+  `receiptUrl` — esa es una garantía del sistema. Cancelar a mano desde el
+  tablero (Fase 4) es una decisión de una persona, no del sistema: puede
+  hacerse en cualquier estado no terminal, comprobante adjunto o no. Son
+  reglas distintas a propósito, en `src/lib/orders/order-transitions.ts`.
+- **Pausar la IA es una acción explícita, separada de mandar un mensaje.**
+  Un operador puede escribirle a un cliente sin que eso pause la IA por su
+  cuenta — si lo hiciera automáticamente, sería fácil perder el control
+  del bot sin querer con un solo mensaje suelto. Pausar/reactivar y
+  "marcar resuelta" son botones aparte en `/conversaciones`.
+- **Notificaciones de estado del pedido: solo en las transiciones que le
+  importan al cliente.** Al avanzar un pedido manualmente, se le avisa por
+  WhatsApp cuando pasa a "en camino" o "entregado" (y al validarle el pago
+  o cancelarle el pedido) — no en cada paso interno (ej. pasar a
+  "en preparación" no genera un mensaje, es información de uso interno).
 
 ## Estructura del repo
 
@@ -441,7 +502,8 @@ prisma.config.ts           Config de Prisma Migrate (Prisma 7)
 src/lib/ai/                 Abstracción de LLM (OpenAI/Anthropic), log de uso, prompt de sucursal, Whisper
 src/lib/whatsapp/           Graph API de Meta, verificación de firma, procesamiento de webhooks, envío de mensajes
 src/lib/orders/              Motor de pedidos (Fase 3): horarios, matching de catálogo, zona, prompt,
-                             aplicación de acciones, creación de pedido, mensajes deterministas, orquestador (engine.ts)
+                             aplicación de acciones, creación de pedido, mensajes deterministas, orquestador (engine.ts);
+                             transiciones de estado manuales del tablero (Fase 4, order-transitions.ts)
 src/lib/jobs/                 Colas de BullMQ (recordatorio/cancelación de comprobante, vencimiento de conversación)
 src/worker/                   Proceso del worker (index.ts conecta BullMQ, handlers.ts tiene la lógica de cada job)
 src/lib/validations/        Schemas de zod por dominio (producto, horarios, zona, pagos, IA, auth, pedido)
@@ -451,7 +513,8 @@ src/lib/catalog-image.tsx   Render determinístico de la imagen de catálogo (ne
 src/lib/crypto.ts           Cifrado en reposo de tokens/secretos (AES-256-GCM)
 src/lib/                    Prisma client, auth, helpers
 src/app/(auth)/              Login y registro
-src/app/(dashboard)/         Panel autenticado (layout + una carpeta por sección/épica)
+src/app/(dashboard)/         Panel autenticado (layout + una carpeta por sección/épica);
+                             pedidos/ y conversaciones/ son el tablero y la bandeja en vivo (Fase 4)
 src/app/api/                 Rutas de API (auth, registro, catálogo, horarios, zona, pagos, IA, WhatsApp, uploads)
 src/app/api/webhooks/        Endpoints públicos que llama Meta directamente (sin sesión)
 src/proxy.ts                 Protección de rutas (login requerido / redirect)

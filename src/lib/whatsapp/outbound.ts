@@ -17,8 +17,11 @@ export async function sendOutboundText(params: {
   customerPhone: string;
   line: OutboundLine;
   text: string;
-}): Promise<void> {
-  await prisma.message.create({
+  // Si lo manda un operador humano desde la bandeja en vivo (Fase 4), en vez
+  // del motor de IA. Queda null para los mensajes generados por la IA/jobs.
+  sentByUserId?: string;
+}): Promise<{ messageId: string; sent: boolean }> {
+  const message = await prisma.message.create({
     data: {
       companyId: params.companyId,
       branchId: params.branchId,
@@ -26,6 +29,7 @@ export async function sendOutboundText(params: {
       direction: "OUTBOUND",
       messageType: "TEXT",
       textContent: params.text,
+      sentByUserId: params.sentByUserId,
       processedAt: new Date(),
     },
   });
@@ -39,10 +43,13 @@ export async function sendOutboundText(params: {
         to: params.customerPhone,
         text: params.text,
       });
+      return { messageId: message.id, sent: true };
     } catch (error) {
       console.error("Error enviando mensaje de WhatsApp:", error);
+      return { messageId: message.id, sent: false };
     }
-  } else {
-    console.warn(`Línea sin token de acceso: no se pudo enviar el mensaje a ${params.customerPhone}`);
   }
+
+  console.warn(`Línea sin token de acceso: no se pudo enviar el mensaje a ${params.customerPhone}`);
+  return { messageId: message.id, sent: false };
 }
