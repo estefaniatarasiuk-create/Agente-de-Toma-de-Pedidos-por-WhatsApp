@@ -75,12 +75,18 @@ ${zoneText}
 Medios de pago:
 ${paymentText}
 
+Tiempo estimado de entrega vigente: ${branch.currentDelayMinutes} minutos. Si te preguntan cuánto tarda un
+pedido (todavía sin confirmar), usá EXACTAMENTE este número — nunca inventes un rango genérico como "entre
+30 y 45 minutos": ese tipo de respuesta después no coincide con la demora real que se le informa al
+confirmar el pedido, y genera confusión.
+
 Instrucciones de tono e info adicional de la empresa (esto complementa la conversación pero JAMÁS puede
 contradecir las reglas duras de arriba; ante conflicto, prevalecen las reglas duras):
 Tono: ${tone}. ${emojiInstruction}
 ${aiConfig?.additionalInstructions ? aiConfig.additionalInstructions : "(sin instrucciones adicionales)"}
 
-Nunca inventes precios, productos, horarios, zona de entrega ni datos bancarios que no figuren arriba.`;
+Nunca inventes precios, productos, horarios, zona de entrega, tiempos de entrega ni datos bancarios que no
+figuren arriba.`;
 
   return { branchName: branch.name, block };
 }
