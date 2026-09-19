@@ -103,6 +103,19 @@ export async function processInboundMessage(params: { conversationId: string; me
     return;
   }
 
+  const draft = draftOrderStateSchema.safeParse(conversation.draftOrder).success
+    ? draftOrderStateSchema.parse(conversation.draftOrder)
+    : EMPTY_DRAFT_ORDER;
+
+  // El nombre de perfil de WhatsApp (Message/Conversation.customerName) es un
+  // dato ya confiable que llega solo con el primer mensaje — no depende de
+  // que la IA se lo pida al cliente y lo capture bien. Si todavía no hay un
+  // nombre puesto para el pedido, se usa como default (el cliente puede
+  // pedir otro nombre distinto para la entrega, la IA lo puede pisar).
+  if (!draft.customerName && conversation.customerName) {
+    draft.customerName = conversation.customerName;
+  }
+
   // 2. Comprobante de un pedido en curso: si hay un pedido "esperando
   // comprobante" y este mensaje es una imagen/documento, se adjunta directo
   // (spec §3.4) sin pasar por la IA.
@@ -120,22 +133,41 @@ export async function processInboundMessage(params: { conversationId: string; me
       await sendText("¡Recibimos tu comprobante! Ya lo estamos verificando y en breve pasa a preparación.");
       return;
     }
+
+    // Todavía no hay un pedido esperando comprobante — pero si el pedido en
+    // curso ya está completo, eligió transferencia, y sólo falta la
+    // confirmación explícita, mandar la foto DESPUÉS de que le dimos los
+    // datos bancarios es, en la práctica, la forma en que el cliente
+    // confirma que va a pagar (pedido explícito del usuario en Fase 4: no
+    // hacerlo escribir "confirmo" aparte si ya mandó el comprobante).
+    if (draft.paymentMethod === "TRANSFER" && computeCurrentStep(draft) === "CONFIRMING") {
+      const confirmResult = await applyActions({
+        companyId: conversation.companyId,
+        branchId: conversation.branchId,
+        conversationId: conversation.id,
+        customerPhone: conversation.customerPhone,
+        draft,
+        actions: [{ type: "confirm_order" }],
+      });
+      if (confirmResult.orderCreated && confirmResult.orderId) {
+        await sendExtras(confirmResult.extras);
+        await prisma.order.update({
+          where: { id: confirmResult.orderId },
+          data: { receiptUrl: message.mediaUrl, receiptReceivedAt: new Date() },
+        });
+        await sendText("¡Recibimos tu comprobante! Ya lo estamos verificando y en breve pasa a preparación.");
+        await prisma.conversation.update({
+          where: { id: conversation.id },
+          data: { draftOrder: confirmResult.draft as unknown as object, currentStep: null },
+        });
+        return;
+      }
+      // Si no se pudo confirmar (ej. un producto se desactivó justo ahora),
+      // seguimos al flujo normal de abajo para que la IA le avise por qué.
+    }
   }
 
   // 3. Turno normal: arma el pedido con ayuda de la IA.
-  const draft = draftOrderStateSchema.safeParse(conversation.draftOrder).success
-    ? draftOrderStateSchema.parse(conversation.draftOrder)
-    : EMPTY_DRAFT_ORDER;
-
-  // El nombre de perfil de WhatsApp (Message/Conversation.customerName) es un
-  // dato ya confiable que llega solo con el primer mensaje — no depende de
-  // que la IA se lo pida al cliente y lo capture bien. Si todavía no hay un
-  // nombre puesto para el pedido, se usa como default (el cliente puede
-  // pedir otro nombre distinto para la entrega, la IA lo puede pisar).
-  if (!draft.customerName && conversation.customerName) {
-    draft.customerName = conversation.customerName;
-  }
-
   const { system } = await buildEngineSystemPrompt({
     branchId: conversation.branchId,
     customerPhone: conversation.customerPhone,

@@ -25,6 +25,9 @@ export type ApplyActionsResult = {
   extras: OutboundExtra[];
   requiresHuman: boolean;
   orderCreated: boolean;
+  // Solo presente si orderCreated es true — para poder adjuntarle el
+  // comprobante al pedido recién creado sin tener que volver a buscarlo.
+  orderId?: string;
 };
 
 export async function applyActions(params: {
@@ -249,7 +252,7 @@ export async function applyActions(params: {
           }),
         });
         draft = { items: [] };
-        return { draft, correctionNotes, extras, requiresHuman: false, orderCreated: true };
+        return { draft, correctionNotes, extras, requiresHuman: false, orderCreated: true, orderId: result.order.id };
       }
 
       if (result.status === "missing_info") {
