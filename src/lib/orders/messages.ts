@@ -31,6 +31,7 @@ export function buildOrderConfirmedMessage(params: {
   totalCents: number;
   paymentMethod: "CASH" | "TRANSFER";
   changeAmountCents: number | null;
+  cashPaymentAmountCents?: number;
   estimatedDeliveryMinutes: number;
 }): string {
   const lines = [
@@ -38,6 +39,19 @@ export function buildOrderConfirmedMessage(params: {
   ];
   if (params.paymentMethod === "CASH" && params.changeAmountCents !== null && params.changeAmountCents > 0) {
     lines.push(`El repartidor va a llevar ${formatCentsAsArs(params.changeAmountCents)} de cambio.`);
+  }
+  // Si el cliente dijo que iba a pagar con MENOS plata que el total (el
+  // vuelto calculado da 0 en vez de negativo), avisamos la diferencia en
+  // vez de quedarnos calladas — si no, ni el cliente ni el repartidor se
+  // enteran de que falta cobrar algo al entregar.
+  if (
+    params.paymentMethod === "CASH" &&
+    params.cashPaymentAmountCents !== undefined &&
+    params.cashPaymentAmountCents < params.totalCents
+  ) {
+    lines.push(
+      `Ojo: dijiste que ibas a pagar con ${formatCentsAsArs(params.cashPaymentAmountCents)}, que es menos que el total — todavía faltan ${formatCentsAsArs(params.totalCents - params.cashPaymentAmountCents)} para completar el pago.`,
+    );
   }
   if (params.paymentMethod === "TRANSFER") {
     lines.push("Quedamos esperando tu comprobante de transferencia para empezar a preparar tu pedido.");

@@ -79,8 +79,13 @@ aplicarlas:
   el cliente escribió de verdad. NUNCA inventes un valor genérico como "Cliente" cuando todavía no te lo
   dijo — si no te dio el nombre, no mandes el campo "name" en absoluto, y pedíselo en tu "reply".
 - {"type": "set_payment_method", "method": "CASH" o "TRANSFER", "cashAmount": <número, opcional, en pesos>}
-  "cashAmount" es el monto en pesos con el que el cliente dice que va a pagar (para calcular el vuelto),
-  solo si method es "CASH" y el cliente lo mencionó.
+  "cashAmount" es el monto en pesos con el que el cliente dice que va a pagar, solo si method es "CASH" y el
+  cliente lo mencionó. MUY IMPORTANTE: NUNCA calcules vos el vuelto/cambio (la resta entre "cashAmount" y el
+  total) ni digas frases como "te da un saldo a favor" o "te da un cambio de $X" — esa cuenta la hace el
+  sistema siempre, y en más de una prueba real la IA la hizo mal (hasta al revés, prometiendo cambio cuando
+  en realidad faltaba plata). En tu "reply" simplemente repetí el monto con el que el cliente dijo que va a
+  pagar, sin calcular ni mencionar ninguna diferencia — el mensaje de confirmación final que manda el
+  sistema ya incluye el vuelto correcto si corresponde.
 - {"type": "confirm_order"}
   Es la ÚNICA forma en que un pedido queda registrado de verdad — no existe ningún paso intermedio de
   "procesando" ni "guardando": o incluís esta acción en "actions" en este mismo turno, o el pedido no pasa a

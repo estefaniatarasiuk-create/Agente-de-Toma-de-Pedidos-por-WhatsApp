@@ -599,3 +599,57 @@ describe("applyActions — no repite la confirmación de domicilio si sigue sien
     expect(second.extras.some((extra) => extra.kind === "text" && extra.text.includes("Anoté tu domicilio"))).toBe(false);
   });
 });
+
+// Regresión de un caso real: el cliente dijo que iba a pagar en efectivo
+// con MENOS plata que el total del pedido ($1.500 sobre un total de
+// $2.800). La IA calculó mal el vuelto en su propio texto ("te da un
+// cambio de $700", matemática invertida — en realidad faltaban $1.300),
+// pero el sistema nunca avisaba la diferencia real a nadie. Ahora el
+// mensaje de confirmación (el oficial, generado en código) avisa
+// explícitamente cuánto falta cobrar en vez de quedarse callado.
+describe("applyActions — avisa si el cliente paga en efectivo menos que el total", () => {
+  const companiesToCleanup: string[] = [];
+
+  afterAll(async () => {
+    for (const companyId of companiesToCleanup) await cleanupCompany(companyId);
+  });
+
+  it("el mensaje de confirmación dice cuánto falta cobrar, no un vuelto inexistente", async () => {
+    const { company, branch } = await createTestCompanyAndBranch();
+    companiesToCleanup.push(company.id);
+    const product = await prisma.product.create({
+      data: { companyId: company.id, branchId: branch.id, name: "Coca Cola 1.5L", priceCents: 280000 },
+    });
+    await prisma.paymentMethodConfig.create({
+      data: { companyId: company.id, branchId: branch.id, cashEnabled: true, transferEnabled: false },
+    });
+    const conversation = await prisma.conversation.create({
+      data: { companyId: company.id, branchId: branch.id, customerPhone: "5491100000011" },
+    });
+
+    const draft = {
+      items: [{ productId: product.id, productName: product.name, unitPriceCents: product.priceCents, quantity: 1 }],
+      customerName: "Cliente Test",
+      deliveryAddressRaw: "Calle Falsa 123",
+      deliveryLatitude: -34.6,
+      deliveryLongitude: -58.38,
+      paymentMethod: "CASH" as const,
+      cashPaymentAmountCents: 150000,
+    };
+
+    const result = await applyActions({
+      companyId: company.id,
+      branchId: branch.id,
+      conversationId: conversation.id,
+      customerPhone: "5491100000011",
+      draft,
+      actions: [{ type: "confirm_order" }],
+    });
+
+    expect(result.orderCreated).toBe(true);
+    const confirmedText = result.extras.find((extra) => extra.kind === "text")?.text ?? "";
+    expect(confirmedText).toContain("todavía faltan");
+    expect(confirmedText).toContain("1.300,00");
+    expect(confirmedText).not.toContain("de cambio");
+  });
+});

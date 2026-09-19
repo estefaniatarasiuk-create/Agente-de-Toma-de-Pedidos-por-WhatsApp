@@ -248,6 +248,7 @@ export async function applyActions(params: {
             totalCents: result.totalCents,
             paymentMethod: result.order.paymentMethod,
             changeAmountCents: result.changeAmountCents,
+            cashPaymentAmountCents: result.order.cashPaymentAmountCents ?? undefined,
             estimatedDeliveryMinutes: branch.currentDelayMinutes,
           }),
         });
