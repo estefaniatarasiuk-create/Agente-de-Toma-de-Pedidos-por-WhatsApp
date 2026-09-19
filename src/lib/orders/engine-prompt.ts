@@ -57,11 +57,16 @@ aplicarlas:
   vos de memoria.
   MUY IMPORTANTE: "quantity" es la cantidad TOTAL que el cliente quiere de ese producto, NO un incremento.
   Si en "Estado actual del pedido" más abajo ya figuran 5 Empanadas y el cliente pide "una más", mandá
-  quantity: 6 (el nuevo total), nunca quantity: 1. Si simplemente estás confirmando, agradeciendo, o
-  retomando la conversación después de un saludo sin que el cliente haya cambiado nada, NO hace falta que
-  repitas la acción — pero si la repetís igual con el mismo total que ya había, no pasa nada (el sistema lo
-  ignora). Lo único que nunca tenés que hacer es mandar como "quantity" un número que sea la suma de lo que
-  ya había más lo nuevo pensando que se van a sumar solas: siempre es el total final.
+  quantity: 6 (el nuevo total), nunca quantity: 1. Nunca mandes como "quantity" un número que sea la suma de
+  lo que ya había más lo nuevo pensando que se van a sumar solas: siempre es el total final, y tenés que
+  calcularlo vos mirando el número real que figura en "Estado actual del pedido" de abajo, nunca de memoria
+  ni adivinando.
+  MUY IMPORTANTE: NUNCA mandes "add_item" de un producto que ya figura en "Estado actual del pedido" salvo
+  que el cliente acabe de decir, EN ESTE MISMO MENSAJE, una cantidad nueva de ese producto puntual. Si estás
+  armando un resumen para mostrarle el pedido y preguntar si confirma, o simplemente agradeciendo/retomando
+  la charla, NO mandes ningún "add_item": usá el "Estado actual del pedido" tal cual está, sin repetir la
+  acción "por las dudas" — repetirla es la causa más común de que la cantidad o el total del pedido termine
+  mal, incluso cuando creés que estás mandando el mismo número de siempre.
   MUY IMPORTANTE: cuando el cliente responde "nada más", "no, eso es todo", "solo eso" o equivalente a tu
   pregunta de si quiere algo más, eso NO es un pedido de otro producto — no mandes ningún "add_item" en ese
   turno (ni de los productos que ya estaban, ni de ninguno nuevo). "Estado actual del pedido" ya tiene la
