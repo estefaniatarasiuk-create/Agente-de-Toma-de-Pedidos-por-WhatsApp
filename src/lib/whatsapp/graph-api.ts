@@ -21,6 +21,17 @@ async function graphFetch<T>(path: string, init?: RequestInit): Promise<T> {
   return data as T;
 }
 
+// Los números de celular argentinos llegan en los mensajes entrantes con un
+// "9" extra después del código de país (ej. 5491166443775, wa_id real del
+// cliente), pero la Cloud API rechaza el envío si se le manda ese mismo
+// formato de vuelta como destinatario — hay que sacarle el 9 (5411...). Es
+// una rareza específica de Argentina en la plataforma de Meta, no aplica a
+// otros países.
+function normalizeRecipientPhone(phone: string): string {
+  if (phone.startsWith("549")) return `54${phone.slice(3)}`;
+  return phone;
+}
+
 function requireAppCredentials() {
   const appId = process.env.NEXT_PUBLIC_META_APP_ID;
   const appSecret = process.env.META_APP_SECRET;
@@ -99,7 +110,7 @@ export async function sendWhatsAppTextMessage(params: {
     },
     body: JSON.stringify({
       messaging_product: "whatsapp",
-      to: params.to,
+      to: normalizeRecipientPhone(params.to),
       type: "text",
       text: { body: params.text },
     }),
@@ -142,7 +153,7 @@ export async function sendWhatsAppImageMessage(params: {
     },
     body: JSON.stringify({
       messaging_product: "whatsapp",
-      to: params.to,
+      to: normalizeRecipientPhone(params.to),
       type: "image",
       image: { id: params.mediaId, caption: params.caption },
     }),
