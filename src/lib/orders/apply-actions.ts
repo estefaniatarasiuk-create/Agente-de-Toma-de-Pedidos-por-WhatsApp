@@ -117,6 +117,14 @@ export async function applyActions(params: {
           draft.deliveryAddressNormalized = validation.formattedAddress;
           draft.deliveryLatitude = validation.latitude;
           draft.deliveryLongitude = validation.longitude;
+          // Confirmarle al cliente el domicilio COMPLETO que entendimos
+          // (con localidad/barrio) es la única forma de que note si la
+          // geocodificación se equivocó de zona con un nombre de calle
+          // repetido — no alcanza con aceptarlo en silencio.
+          extras.push({
+            kind: "text",
+            text: `Anoté tu domicilio como: ${validation.formattedAddress}. Si no es el correcto, contame de nuevo con más detalle (localidad, entre qué calles, etc.).`,
+          });
         } else if (validation.status === "out_of_zone") {
           correctionNotes.push(buildOutOfZoneMessage());
           // Fuera de zona: no tiene sentido seguir armando este pedido.
