@@ -123,6 +123,10 @@ describe("applyActions — add_item fija el total, no lo suma, y protege la conf
     expect(result.orderCreated).toBe(false);
     expect(result.draft.items[0].quantity).toBe(15);
     expect(result.correctionNotes.some((note) => note.toLowerCase().includes("confirmame de nuevo"))).toBe(true);
+    // Bug real reportado: el mensaje de bloqueo decía "fijate que quedó
+    // bien" sin mostrar nada para revisar — ahora incluye el resumen
+    // actualizado (15x Chipa, no el 10 original) en el mismo mensaje.
+    expect(result.correctionNotes.some((note) => note.includes("15x Chipa"))).toBe(true);
 
     const orders = await prisma.order.findMany({ where: { branchId: branch.id } });
     expect(orders).toHaveLength(0);

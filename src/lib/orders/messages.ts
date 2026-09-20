@@ -27,6 +27,25 @@ export function buildDraftSummary(draft: DraftOrderState): string {
   return lines.join("\n");
 }
 
+// Resumen completo (productos, nombre, domicilio, medio de pago) para
+// mostrarle al cliente cuando confirm_order se bloquea — sin esto, el
+// mensaje de bloqueo le pedía "fijate que quedó bien" sin mostrarle nada
+// que pudiera revisar (bug real reportado en la Fase 4).
+export function buildFullOrderSummary(draft: DraftOrderState): string {
+  const lines = [buildDraftSummary(draft)];
+  if (draft.customerName) lines.push(`Nombre: ${draft.customerName}`);
+  if (draft.deliveryAddressRaw) lines.push(`Domicilio: ${draft.deliveryAddressRaw}`);
+  if (draft.paymentMethod) {
+    const paymentLabel = draft.paymentMethod === "CASH" ? "Efectivo" : "Transferencia";
+    const cashDetail =
+      draft.paymentMethod === "CASH" && draft.cashPaymentAmountCents !== undefined
+        ? ` con ${formatCentsAsArs(draft.cashPaymentAmountCents)}`
+        : "";
+    lines.push(`Medio de pago: ${paymentLabel}${cashDetail}`);
+  }
+  return lines.join("\n");
+}
+
 export function buildOrderConfirmedMessage(params: {
   totalCents: number;
   paymentMethod: "CASH" | "TRANSFER";
@@ -37,9 +56,12 @@ export function buildOrderConfirmedMessage(params: {
   const lines = [
     `¡Pedido confirmado! Total: ${formatCentsAsArs(params.totalCents)}.`,
   ];
-  if (params.paymentMethod === "CASH" && params.changeAmountCents !== null && params.changeAmountCents > 0) {
-    lines.push(`El repartidor va a llevar ${formatCentsAsArs(params.changeAmountCents)} de cambio.`);
-  }
+  // Pedido explícito del usuario: nunca le prometemos al cliente cuánto
+  // cambio va a llevar el repartidor — el negocio no puede garantizar eso
+  // de antemano (depende de con qué efectivo salga a repartir). El vuelto
+  // calculado sigue visible para el operador en el detalle del pedido del
+  // panel; acá solo se avisa si en los hechos FALTA plata (ver abajo), que
+  // sí es información que el cliente necesita saber.
   // Si el cliente dijo que iba a pagar con MENOS plata que el total (el
   // vuelto calculado da 0 en vez de negativo), avisamos la diferencia en
   // vez de quedarnos calladas — si no, ni el cliente ni el repartidor se

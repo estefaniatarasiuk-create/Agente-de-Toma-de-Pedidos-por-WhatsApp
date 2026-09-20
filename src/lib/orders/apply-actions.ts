@@ -8,6 +8,7 @@ import { createOrderFromDraft } from "@/lib/orders/create-order";
 import { computeCurrentStep, getMissingOrderFields, MISSING_FIELD_LABEL } from "@/lib/orders/draft-step";
 import {
   buildAmbiguousAddressMessage,
+  buildFullOrderSummary,
   buildGeocodingUnavailableMessage,
   buildOrderConfirmedMessage,
   buildOutOfZoneMessage,
@@ -212,8 +213,12 @@ export async function applyActions(params: {
           return { draft, correctionNotes, extras, requiresHuman: true, orderCreated: false };
         }
         if (draftChangedThisTurn) {
+          // Bug real reportado: este mensaje le pedía "fijate que quedó
+          // bien" sin mostrarle nada — el cliente no tenía forma de
+          // revisar el cambio antes de confirmar de nuevo. Ahora se
+          // reincluye el resumen actualizado en el mismo mensaje.
           correctionNotes.push(
-            "Antes de confirmar, actualicé tu pedido con el cambio que me pediste. Fijate que quedó bien y confirmame de nuevo para registrarlo.",
+            `Antes de confirmar, actualicé tu pedido con el cambio que me pediste:\n\n${buildFullOrderSummary(draft)}\n\nSi quedó bien, confirmame de nuevo para registrarlo.`,
           );
         } else {
           // El mensaje genérico "ya tengo todos los datos" es engañoso si en
@@ -226,7 +231,7 @@ export async function applyActions(params: {
           correctionNotes.push(
             missing.length > 0
               ? `Todavía me falta ${missing.map((field) => MISSING_FIELD_LABEL[field] ?? field).join(", ")} para poder confirmar el pedido.`
-              : "¡Ya tengo todos los datos de tu pedido! Fijate el resumen y confirmámelo en tu próximo mensaje para registrarlo.",
+              : `¡Ya tengo todos los datos de tu pedido!\n\n${buildFullOrderSummary(draft)}\n\nSi está todo bien, confirmámelo en tu próximo mensaje para registrarlo.`,
           );
         }
         continue;
