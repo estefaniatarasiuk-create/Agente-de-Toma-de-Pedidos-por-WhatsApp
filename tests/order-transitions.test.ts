@@ -52,11 +52,26 @@ describe("order-transitions", () => {
     const r2 = await advanceOrderStatus({ branchId: branch.id, orderId: order.id, userId: user.id });
     if (r2.status === "ok") expect(r2.order.status).toBe("ON_THE_WAY");
 
+    // "En camino" sí le avisa al cliente por WhatsApp (queda un Message
+    // OUTBOUND persistido, incluso sin línea configurada en el test).
+    const messagesAfterOnTheWay = await prisma.message.findMany({
+      where: { conversationId: order.conversationId!, direction: "OUTBOUND" },
+    });
+    expect(messagesAfterOnTheWay.some((m) => m.textContent?.includes("salió"))).toBe(true);
+
     const r3 = await advanceOrderStatus({ branchId: branch.id, orderId: order.id, userId: user.id });
     if (r3.status === "ok") {
       expect(r3.order.status).toBe("DELIVERED");
       expect(r3.order.deliveredAt).not.toBeNull();
     }
+
+    // Pedido explícito del usuario en Fase 4: "Entregado" es un registro
+    // interno (nadie confirma que el pedido llegó de verdad en ese
+    // momento), así que NO le manda ningún mensaje nuevo al cliente.
+    const messagesAfterDelivered = await prisma.message.findMany({
+      where: { conversationId: order.conversationId!, direction: "OUTBOUND" },
+    });
+    expect(messagesAfterDelivered).toHaveLength(messagesAfterOnTheWay.length);
 
     const events = await prisma.orderStatusEvent.findMany({ where: { orderId: order.id }, orderBy: { createdAt: "asc" } });
     expect(events.map((e) => e.toStatus)).toEqual(["PREPARING", "ON_THE_WAY", "DELIVERED"]);

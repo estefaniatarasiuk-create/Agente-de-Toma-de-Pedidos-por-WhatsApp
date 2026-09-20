@@ -2,7 +2,6 @@ import { prisma } from "@/lib/prisma";
 import { sendOutboundText } from "@/lib/whatsapp/outbound";
 import {
   buildOrderCancelledByCompanyMessage,
-  buildOrderDeliveredMessage,
   buildOrderOnTheWayMessage,
   buildPaymentValidatedMessage,
 } from "@/lib/orders/messages";
@@ -70,8 +69,12 @@ export async function advanceOrderStatus(params: {
     },
   });
 
+  // "Entregado" es un registro interno del local (se marca a mano en el
+  // tablero, no hay forma de confirmar que el pedido llegó de verdad en
+  // ese momento) — a diferencia de "en camino", no le mandamos WhatsApp al
+  // cliente por este cambio, para no arriesgarnos a avisarle "entregado"
+  // antes de que en realidad le llegue (pedido explícito de la Fase 4).
   if (nextStatus === "ON_THE_WAY") await notifyCustomer(updated, params.userId, buildOrderOnTheWayMessage());
-  if (nextStatus === "DELIVERED") await notifyCustomer(updated, params.userId, buildOrderDeliveredMessage());
 
   return { status: "ok", order: updated };
 }

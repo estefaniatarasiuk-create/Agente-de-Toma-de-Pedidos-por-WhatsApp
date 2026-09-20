@@ -102,10 +102,6 @@ export function buildOrderOnTheWayMessage(): string {
   return "¡Tu pedido ya salió! En breve llega a tu domicilio.";
 }
 
-export function buildOrderDeliveredMessage(): string {
-  return "¡Tu pedido fue entregado! Gracias por tu compra 😊";
-}
-
 export function buildOrderCancelledByCompanyMessage(reason: string): string {
   return `Tuvimos que cancelar tu pedido: ${reason}. Disculpá las molestias — si querés, podés hacer el pedido de nuevo.`;
 }
