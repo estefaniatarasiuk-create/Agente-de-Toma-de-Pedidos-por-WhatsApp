@@ -49,7 +49,7 @@ export async function validateDeliveryAddress(
     { latitude: geocoded.latitude, longitude: geocoded.longitude },
   );
 
-  if (distance > zone.radiusKm) {
+  if (distance > zone.radiusKm || !geocoded.isPreciseMatch) {
     // Antes de rechazarla, reintentamos restringiendo la búsqueda a la
     // localidad del local (ver reverseGeocodeLocality) — una dirección mal
     // escrita o incompleta (ej. sin un apellido/nombre propio de la calle)
@@ -63,7 +63,14 @@ export async function validateDeliveryAddress(
           { latitude: zone.centerLatitude, longitude: zone.centerLongitude, radiusKm: zone.radiusKm },
           locality,
         );
-        if (retryGeocoded) {
+        // MUY IMPORTANTE: si Google no encuentra la calle puntual restringida
+        // a la localidad, en vez de fallar puede devolver el centro de TODA
+        // la localidad como si fuera una coincidencia válida (bug real
+        // reportado: sugirió "Villa Centenario, Buenos Aires" — la ciudad
+        // entera — como si fuera la dirección puntual del cliente). Un
+        // resultado así nunca es una sugerencia válida, sea cual sea la
+        // distancia: exigimos que sea preciso a nivel de calle.
+        if (retryGeocoded?.isPreciseMatch) {
           const retryDistance = distanceKm(
             { latitude: zone.centerLatitude, longitude: zone.centerLongitude },
             { latitude: retryGeocoded.latitude, longitude: retryGeocoded.longitude },
@@ -80,6 +87,16 @@ export async function validateDeliveryAddress(
       }
     } catch (error) {
       console.error("Error reintentando geocodificación restringida a la localidad:", error);
+    }
+
+    // "Fuera de zona" es una afirmación fuerte — solo la hacemos si tenemos
+    // un resultado PRECISO (a nivel de calle) que de verdad cae lejos. Si ni
+    // la primera pasada ni el reintento encontraron la calle puntual (solo
+    // el centro de una localidad, o nada), no sabemos dónde queda la
+    // dirección real del cliente: es más honesto pedir más detalle
+    // (entrecalles, barrio) que decirle que no llegamos, pudiendo estar mal.
+    if (!geocoded.isPreciseMatch) {
+      return { status: "ambiguous" };
     }
 
     return { status: "out_of_zone", distanceKm: distance, radiusKm: zone.radiusKm };

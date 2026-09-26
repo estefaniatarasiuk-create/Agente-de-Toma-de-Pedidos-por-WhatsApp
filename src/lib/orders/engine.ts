@@ -140,9 +140,11 @@ async function processInboundMessageLocked(params: { conversationId: string; mes
   // se usaba en silencio el nombre de perfil de WhatsApp como si el
   // cliente lo hubiera confirmado — pero ese nombre suele ser un apodo o
   // un alias (emojis, nombre de fantasía, etc.), no el nombre real para la
-  // entrega. Ya NO se autocompleta: el nombre de perfil se le pasa a la IA
-  // solo como una sugerencia para preguntar y confirmar (ver
-  // engine-prompt.ts), nunca como un dato ya dado por cierto.
+  // entrega. Se probó pasárselo a la IA como sugerencia para ofrecer y
+  // confirmar, pero en la práctica la IA lo siguió usando para dirigirse
+  // al cliente sin haberlo confirmado nunca — así que ya no se le pasa en
+  // absoluto: el nombre del pedido es SIEMPRE el que el cliente escribe en
+  // la conversación, sin ningún atajo.
 
   // 2. Comprobante de un pedido en curso: si hay un pedido "esperando
   // comprobante" y este mensaje es una imagen/documento, se adjunta directo
@@ -200,7 +202,6 @@ async function processInboundMessageLocked(params: { conversationId: string; mes
     branchId: conversation.branchId,
     customerPhone: conversation.customerPhone,
     draft,
-    whatsappProfileName: conversation.customerName,
   });
 
   const history = await prisma.message.findMany({

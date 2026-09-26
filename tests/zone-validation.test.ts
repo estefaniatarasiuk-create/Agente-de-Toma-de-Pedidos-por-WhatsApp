@@ -8,7 +8,7 @@ import { createTestCompanyAndBranch, cleanupCompany } from "./fixtures";
 // lo demás corren reales.
 vi.mock("@/lib/geocoding", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/geocoding")>();
-  return { ...actual, geocodeAddress: vi.fn() };
+  return { ...actual, geocodeAddress: vi.fn(), reverseGeocodeLocality: vi.fn() };
 });
 
 const { geocodeAddress } = await import("@/lib/geocoding");
@@ -43,6 +43,7 @@ describe("validateDeliveryAddress", () => {
       longitude: -64.1888,
       formattedAddress: "Córdoba, Argentina",
       partialMatch: false,
+      isPreciseMatch: true,
       fromCache: false,
     });
 
@@ -72,6 +73,7 @@ describe("validateDeliveryAddress", () => {
       longitude: -58.3745,
       formattedAddress: "Av. de Mayo 700, CABA",
       partialMatch: false,
+      isPreciseMatch: true,
       fromCache: false,
     });
 
@@ -85,6 +87,50 @@ describe("validateDeliveryAddress", () => {
 
     const result = await validateDeliveryAddress(branch.id, "Cualquier dirección 123");
     expect(result.status).toBe("zone_not_configured");
+  });
+
+  it("no sugiere una corrección si el reintento solo encuentra el centro de la localidad, no la calle puntual", async () => {
+    const { company, branch } = await createTestCompanyAndBranch();
+    companiesToCleanup.push(company.id);
+    await prisma.deliveryZone.create({
+      data: {
+        companyId: company.id,
+        branchId: branch.id,
+        centerLatitude: ZONE_CENTER.latitude,
+        centerLongitude: ZONE_CENTER.longitude,
+        radiusKm: ZONE_CENTER.radiusKm,
+      },
+    });
+    const { reverseGeocodeLocality } = await import("@/lib/geocoding");
+    const reverseGeocodeLocalityMock = vi.mocked(reverseGeocodeLocality);
+
+    // Primera pasada: tampoco encuentra la calle puntual (Google ya cae a
+    // un resultado de baja precisión desde acá, no recién en el reintento).
+    geocodeAddressMock.mockResolvedValueOnce({
+      latitude: -31.4201,
+      longitude: -64.1888,
+      formattedAddress: "Córdoba Province, Argentina",
+      partialMatch: false,
+      isPreciseMatch: false,
+      fromCache: false,
+    });
+    reverseGeocodeLocalityMock.mockResolvedValueOnce("Villa Centenario");
+    // Reintento restringido a la localidad: Google no encuentra la calle
+    // puntual y devuelve el centro de TODA la localidad en su lugar — bug
+    // real reportado: esto no es una sugerencia válida, aunque caiga dentro
+    // del radio de entrega (el radio puede ser grande y cubrir la localidad
+    // entera igual).
+    geocodeAddressMock.mockResolvedValueOnce({
+      latitude: -34.61,
+      longitude: -58.3745,
+      formattedAddress: "Villa Centenario, Buenos Aires Province, Argentina",
+      partialMatch: false,
+      isPreciseMatch: false,
+      fromCache: false,
+    });
+
+    const result = await validateDeliveryAddress(branch.id, "guido de franco 1510");
+    expect(result.status).toBe("ambiguous");
   });
 
   it("devuelve ambiguous si no se pudo geocodificar la dirección", async () => {

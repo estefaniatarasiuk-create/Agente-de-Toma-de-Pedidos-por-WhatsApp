@@ -36,13 +36,28 @@ export type GeocodeResult = {
   formattedAddress: string;
   partialMatch: boolean;
   fromCache: boolean;
+  // false si el resultado es "a nivel de localidad" (Google no encontró la
+  // calle puntual y devolvió el centro de toda la ciudad/partido en su
+  // lugar) — pasa seguido cuando se restringe la búsqueda con "components"
+  // a una localidad y la calle está mal escrita: Google, en vez de fallar,
+  // devuelve la localidad entera como si fuera una coincidencia válida. Un
+  // resultado así NUNCA debería aceptarse ni sugerirse como si fuera la
+  // dirección puntual del cliente — ver el chequeo en zone-validation.ts.
+  isPreciseMatch: boolean;
 };
+
+const PRECISE_RESULT_TYPES = new Set(["street_address", "premise", "subpremise", "route"]);
+
+function isPreciseGeocodeResult(types: string[] | undefined): boolean {
+  return (types ?? []).some((type) => PRECISE_RESULT_TYPES.has(type));
+}
 
 type GoogleGeocodeResponse = {
   status: string;
   results: Array<{
     formatted_address: string;
     partial_match?: boolean;
+    types?: string[];
     geometry: { location: { lat: number; lng: number } };
   }>;
 };
@@ -80,6 +95,9 @@ export async function geocodeAddress(
       longitude: cached.longitude,
       formattedAddress: cached.formattedAddress ?? cached.rawAddress,
       partialMatch: false,
+      // Solo se cachean resultados precisos (ver más abajo), así que
+      // cualquier entrada en la cache es, por construcción, precisa.
+      isPreciseMatch: true,
       fromCache: true,
     };
   }
@@ -115,23 +133,31 @@ export async function geocodeAddress(
 
   const bestResult = data.results[0];
   const isAmbiguous = data.results.length > 1 || Boolean(bestResult.partial_match);
+  const isPreciseMatch = isPreciseGeocodeResult(bestResult.types);
 
-  await prisma.addressCache.create({
-    data: {
-      normalizedAddress,
-      rawAddress,
-      formattedAddress: bestResult.formatted_address,
-      latitude: bestResult.geometry.location.lat,
-      longitude: bestResult.geometry.location.lng,
-      provider: "google",
-    },
-  });
+  // No cachear resultados "a nivel de localidad" — son la respuesta de
+  // Google cuando no encontró la calle puntual, y cachearlos haría que una
+  // dirección mal escrita quede "pegada" para siempre a solo el centro de
+  // la ciudad en vez de volver a intentar geocodificarla bien más adelante.
+  if (isPreciseMatch) {
+    await prisma.addressCache.create({
+      data: {
+        normalizedAddress,
+        rawAddress,
+        formattedAddress: bestResult.formatted_address,
+        latitude: bestResult.geometry.location.lat,
+        longitude: bestResult.geometry.location.lng,
+        provider: "google",
+      },
+    });
+  }
 
   return {
     latitude: bestResult.geometry.location.lat,
     longitude: bestResult.geometry.location.lng,
     formattedAddress: bestResult.formatted_address,
     partialMatch: isAmbiguous,
+    isPreciseMatch,
     fromCache: false,
   };
 }

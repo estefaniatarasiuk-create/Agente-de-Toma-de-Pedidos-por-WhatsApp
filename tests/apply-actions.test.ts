@@ -44,6 +44,7 @@ describe("applyActions — set_customer_info fuera de zona", () => {
       longitude: -64.1888,
       formattedAddress: "Córdoba, Argentina",
       partialMatch: false,
+      isPreciseMatch: true,
       fromCache: false,
     });
 
@@ -103,15 +104,18 @@ describe("applyActions — propone una corrección de domicilio en vez de rechaz
       longitude: -64.1888,
       formattedAddress: "Guidi de Franc, Córdoba, Argentina",
       partialMatch: false,
+      isPreciseMatch: true,
       fromCache: false,
     });
     reverseGeocodeLocalityMock.mockResolvedValueOnce("Villa Centenario");
-    // Reintento restringido a la localidad: resuelve cerca, dentro de zona.
+    // Reintento restringido a la localidad: resuelve cerca, dentro de zona,
+    // y a nivel de calle puntual (no solo el centro de la localidad).
     geocodeAddressMock.mockResolvedValueOnce({
       latitude: -34.61,
       longitude: -58.3745,
       formattedAddress: "Cid Guidi de Franc 1510, Villa Centenario, Argentina",
       partialMatch: false,
+      isPreciseMatch: true,
       fromCache: false,
     });
 
@@ -693,6 +697,7 @@ describe("applyActions — el domicilio validado no se vuelve a contar como camb
       longitude: -58.3745,
       formattedAddress: "Av. de Mayo 700, CABA",
       partialMatch: false,
+      isPreciseMatch: true,
       fromCache: false,
     });
     const first = await applyActions({
@@ -740,6 +745,7 @@ describe("applyActions — el domicilio validado no se vuelve a contar como camb
       longitude: -58.37455,
       formattedAddress: "Av. de Mayo 700, CABA",
       partialMatch: false,
+      isPreciseMatch: true,
       fromCache: false,
     });
     const result = await applyActions({
