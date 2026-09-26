@@ -33,4 +33,15 @@ describe("looksLikeConfirmationText", () => {
     expect(looksLikeConfirmationText("cuánto sale")).toBe(false);
     expect(looksLikeConfirmationText("una torta de ricota porfa")).toBe(false);
   });
+
+  it("detecta expresiones informales argentinas de acuerdo (caso real reportado)", () => {
+    expect(looksLikeConfirmationText("impecable")).toBe(true);
+    expect(looksLikeConfirmationText("buenísimo")).toBe(true);
+    expect(looksLikeConfirmationText("buenisimo")).toBe(true);
+    expect(looksLikeConfirmationText("genial")).toBe(true);
+    expect(looksLikeConfirmationText("bárbaro")).toBe(true);
+    expect(looksLikeConfirmationText("de una")).toBe(true);
+    expect(looksLikeConfirmationText("sipi")).toBe(true);
+    expect(looksLikeConfirmationText("sisi")).toBe(true);
+  });
 });

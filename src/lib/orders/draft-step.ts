@@ -50,7 +50,7 @@ export function isNewOrderIntentText(text: string): boolean {
 // fallido (no escala a un humano por esto), simplemente se le vuelve a
 // mostrar el resumen.
 const CONFIRMATION_RE =
-  /\b(s[ií]+|sip|dale|confirmo|confirmado|confirmar|ok|okay|okey|oka|listo|correcto|exacto|perfecto|de acuerdo|vale|as[ií] est[aá] bien|est[aá] bien|todo bien|todo correcto|qued[oó] bien|eso es|eso mismo|aceptado|joya)\b/i;
+  /\b(s[ií]+|sip|sipi|sisi|dale|confirmo|confirmado|confirmar|ok|okay|okey|oka|listo|correcto|exacto|perfecto|impecable|buen[ií]simo|genial|b[aá]rbaro|de una|de acuerdo|vale|as[ií] est[aá] bien|est[aá] bien|todo bien|todo correcto|qued[oó] bien|eso es|eso mismo|aceptado|joya)\b/i;
 
 export function looksLikeConfirmationText(text: string): boolean {
   return CONFIRMATION_RE.test(text);
