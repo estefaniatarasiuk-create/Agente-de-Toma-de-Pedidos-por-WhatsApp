@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { formatCentsAsArs } from "@/lib/money";
 import { METRICS_RANGE_LABEL, type MetricsRangeKey } from "@/lib/metrics/date-range";
 
@@ -49,13 +49,9 @@ export function MetricsDashboard({ initialData }: { initialData: MetricsData | n
     if (key !== "personalizado") loadRange(key);
   }
 
-  useEffect(() => {
-    if (rangeKey === "personalizado" && customFrom && customTo) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- recarga cuando el usuario termina de elegir ambas fechas, no hay forma de evitar el setState acá
-      loadRange("personalizado", customFrom, customTo);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [customFrom, customTo]);
+  function handleApplyCustomRange() {
+    if (customFrom && customTo) loadRange("personalizado", customFrom, customTo);
+  }
 
   return (
     <div className="flex h-screen flex-col overflow-y-auto p-8">
@@ -64,7 +60,7 @@ export function MetricsDashboard({ initialData }: { initialData: MetricsData | n
         <p className="mt-1 text-sm text-gray-500">Ventas de la sucursal: pedidos, facturación y medios de pago.</p>
       </div>
 
-      <div className="mb-6 flex flex-wrap items-center gap-2">
+      <div className="mb-2 flex flex-wrap items-center gap-2">
         {RANGE_OPTIONS.map((key) => (
           <button
             key={key}
@@ -91,9 +87,18 @@ export function MetricsDashboard({ initialData }: { initialData: MetricsData | n
               onChange={(event) => setCustomTo(event.target.value)}
               className="rounded-md border border-gray-300 px-2 py-1"
             />
+            <button
+              onClick={handleApplyCustomRange}
+              disabled={!customFrom || !customTo}
+              className="rounded-md bg-green-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-green-700 disabled:cursor-not-allowed disabled:bg-gray-300"
+            >
+              Aplicar período
+            </button>
           </div>
         )}
       </div>
+
+      {data && <p className="mb-6 text-xs text-gray-400">Mostrando: {formatRangeLabel(data.range)}</p>}
 
       {!data ? (
         <div className="rounded-lg border border-dashed border-gray-300 bg-white p-8 text-center text-sm text-gray-500">
@@ -144,6 +149,20 @@ function PaymentSplitTile({ cash, transfer }: { cash: MetricsData["cash"]; trans
       </div>
     </div>
   );
+}
+
+// El rango efectivamente aplicado (el que ya está cargado en "data"), no el
+// que el usuario está tipeando en los inputs — así el "Mostrando: ..." nunca
+// queda desincronizado con las tarjetas/el gráfico. "to" llega exclusivo
+// (medianoche del día siguiente), por eso se le resta un día para mostrar el
+// último día realmente incluido.
+function formatRangeLabel(range: MetricsData["range"]): string {
+  const from = new Date(range.from);
+  const lastIncludedDay = new Date(new Date(range.to).getTime() - 24 * 60 * 60 * 1000);
+  const format = (date: Date) => date.toLocaleDateString("es-AR", { day: "2-digit", month: "2-digit", year: "numeric" });
+  const fromLabel = format(from);
+  const toLabel = format(lastIncludedDay);
+  return fromLabel === toLabel ? fromLabel : `${fromLabel} – ${toLabel}`;
 }
 
 function computeNiceMax(value: number): number {
