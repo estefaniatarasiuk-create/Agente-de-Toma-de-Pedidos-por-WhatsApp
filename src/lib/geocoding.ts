@@ -30,6 +30,24 @@ export function normalizeAddress(rawAddress: string): string {
   return normalized.replace(/\s+/g, " ").trim();
 }
 
+// Frase de entrecalles ("entre X y Y", o la abreviatura "e X y Y" pegada a
+// la altura) — bug real reportado: si la calle principal está mal escrita,
+// Google a veces toma una de las calles del "entre" como si fuera la
+// principal (mandó "1510 Guido de granc entre Barbieri y Perón" y devolvió
+// "Vicente Barbieri 1510" en vez de intentar algo parecido a la calle real).
+// Se le manda a geocodificar la dirección SIN esta parte — el domicilio
+// completo con entrecalles se sigue guardando y mostrando al cliente tal
+// cual, esto solo limpia la búsqueda que se le manda a Google.
+const CROSS_STREETS_RE = /\bentre\s+.+?\s+y\s+.+?(?=,|$)|(?<=\d)\s+e\s+.+?\s+y\s+.+?(?=,|$)/i;
+
+export function stripCrossStreetsForQuery(address: string): string {
+  return address
+    .replace(CROSS_STREETS_RE, "")
+    .replace(/\s{2,}/g, " ")
+    .replace(/,\s*$/, "")
+    .trim();
+}
+
 export type GeocodeResult = {
   latitude: number;
   longitude: number;
@@ -106,7 +124,7 @@ export async function geocodeAddress(
   if (!apiKey) throw new Error("Falta GOOGLE_MAPS_API_KEY.");
 
   const url = new URL("https://maps.googleapis.com/maps/api/geocode/json");
-  url.searchParams.set("address", rawAddress);
+  url.searchParams.set("address", stripCrossStreetsForQuery(rawAddress));
   url.searchParams.set("region", "ar");
   url.searchParams.set("components", localityHint ? `country:AR|locality:${localityHint}` : "country:AR");
   if (bias) {
