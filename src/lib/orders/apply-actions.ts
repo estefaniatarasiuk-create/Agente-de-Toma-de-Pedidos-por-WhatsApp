@@ -162,8 +162,19 @@ export async function applyActions(params: {
           // final del pedido, en vez de en un mensaje separado.
         } else if (validation.status === "out_of_zone") {
           correctionNotes.push(buildOutOfZoneMessage());
-          // Fuera de zona: no tiene sentido seguir armando este pedido.
-          draft = { items: [] };
+          // Bug real reportado: esto vaciaba TODO el borrador (productos,
+          // nombre, medio de pago incluidos) — si la geocodificación se
+          // equivocaba con una dirección mal escrita o incompleta (ej. "guidi
+          // de franc 1510" sin el "Cid", que resolvió lejos, cuando la
+          // dirección real sí estaba en zona), el cliente perdía un pedido
+          // entero ya armado sin ningún aviso, solo por un dato mal escrito.
+          // Igual que con cualquier otro dato inválido (nombre, pago), la
+          // respuesta correcta es pedir de nuevo SOLO ese dato — nunca borrar
+          // lo demás que el cliente ya había dado.
+          draft.deliveryAddressRaw = undefined;
+          draft.deliveryAddressNormalized = undefined;
+          draft.deliveryLatitude = undefined;
+          draft.deliveryLongitude = undefined;
         } else if (validation.status === "ambiguous") {
           correctionNotes.push(buildAmbiguousAddressMessage());
         } else if (validation.status === "geocoding_unavailable") {

@@ -12,10 +12,14 @@ vi.mock("@/lib/geocoding", async (importOriginal) => {
 const { geocodeAddress } = await import("@/lib/geocoding");
 const geocodeAddressMock = vi.mocked(geocodeAddress);
 
-// Regresión del otro bug que encontró el usuario en la Fase 1: el preview
-// aceptaba una dirección lejos de la zona de entrega sin avisar. En el
-// motor real (Fase 3), set_customer_info valida contra la zona configurada
-// y, si está fuera de rango, corta el armado del pedido en curso.
+// Regresión de un bug real reportado en la Fase 4: una dirección mal escrita
+// o incompleta (ej. "guidi de franc 1510" sin el "Cid" de "Cid Guidi de
+// Franc") podía geocodificar lejos y devolver "fuera de zona" aunque el
+// domicilio real del cliente sí estuviera en zona — y antes, eso vaciaba
+// TODO el borrador (productos, nombre, medio de pago incluidos), haciendo
+// perder un pedido entero ya armado por un solo dato mal escrito. Ahora
+// "fuera de zona" solo limpia el domicilio, igual que cualquier otro dato
+// inválido — nunca el resto de lo que el cliente ya había dado.
 describe("applyActions — set_customer_info fuera de zona", () => {
   const companiesToCleanup: string[] = [];
 
@@ -23,7 +27,7 @@ describe("applyActions — set_customer_info fuera de zona", () => {
     for (const companyId of companiesToCleanup) await cleanupCompany(companyId);
   });
 
-  it("limpia el borrador y avisa cuando el domicilio está fuera de la zona de entrega", async () => {
+  it("solo limpia el domicilio y avisa, sin borrar el resto del pedido ya armado", async () => {
     const { company, branch } = await createTestCompanyAndBranch();
     companiesToCleanup.push(company.id);
 
@@ -45,6 +49,8 @@ describe("applyActions — set_customer_info fuera de zona", () => {
     const draftWithItems = {
       ...EMPTY_DRAFT_ORDER,
       items: [{ productId: product.id, productName: product.name, unitPriceCents: product.priceCents, quantity: 1 }],
+      customerName: "Cliente Test",
+      paymentMethod: "CASH" as const,
     };
 
     const result = await applyActions({
@@ -56,7 +62,9 @@ describe("applyActions — set_customer_info fuera de zona", () => {
       actions: [{ type: "set_customer_info", address: "San Martín 123, Córdoba" }],
     });
 
-    expect(result.draft.items).toEqual([]);
+    expect(result.draft.items).toEqual(draftWithItems.items);
+    expect(result.draft.customerName).toBe("Cliente Test");
+    expect(result.draft.paymentMethod).toBe("CASH");
     expect(result.draft.deliveryAddressRaw).toBeUndefined();
     expect(result.correctionNotes.some((note) => note.toLowerCase().includes("fuera de nuestra zona"))).toBe(true);
     expect(result.requiresHuman).toBe(false);
