@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { sendOutboundText } from "@/lib/whatsapp/outbound";
 import {
   buildOrderCancelledByCompanyMessage,
+  buildOrderItemsUpdatedMessage,
   buildOrderOnTheWayMessage,
   buildPaymentValidatedMessage,
 } from "@/lib/orders/messages";
@@ -149,6 +150,105 @@ export async function cancelOrder(params: {
     },
   });
   await notifyCustomer(updated, params.userId, buildOrderCancelledByCompanyMessage(params.reason));
+
+  return { status: "ok", order: updated };
+}
+
+export type UpdateItemsResult =
+  | { status: "ok"; order: Order }
+  | { status: "invalid_transition" }
+  | { status: "invalid_items" }
+  | { status: "not_found" };
+
+// Editar los productos de un pedido ya confirmado, desde el panel (pedido
+// explícito del usuario: agregar/quitar/cambiar cantidades — típicamente
+// para sumar algo que el cliente pidió por WhatsApp después de confirmar el
+// pedido original, sin tener que armar un pedido aparte). Igual que en
+// create-order.ts, el precio SIEMPRE sale del catálogo actual — nunca se
+// confía en un precio que venga del cliente de la petición.
+export async function updateOrderItems(params: {
+  branchId: string;
+  orderId: string;
+  userId: string;
+  items: Array<{ productId: string; quantity: number }>;
+}): Promise<UpdateItemsResult> {
+  const order = await prisma.order.findFirst({ where: { id: params.orderId, branchId: params.branchId } });
+  if (!order) return { status: "not_found" };
+  // Igual que la cancelación manual: solo tiene sentido en un estado no
+  // terminal — un pedido ya entregado o cancelado no se puede "editar".
+  if (order.status === "DELIVERED" || order.status === "CANCELLED") return { status: "invalid_transition" };
+
+  const products = await prisma.product.findMany({
+    where: { id: { in: params.items.map((item) => item.productId) }, branchId: params.branchId, isActive: true },
+  });
+  const productById = new Map(products.map((product) => [product.id, product]));
+
+  const items: Array<{
+    companyId: string;
+    branchId: string;
+    orderId: string;
+    productId: string;
+    productName: string;
+    unitPriceCents: number;
+    quantity: number;
+    subtotalCents: number;
+  }> = [];
+  for (const item of params.items) {
+    const product = productById.get(item.productId);
+    if (!product) return { status: "invalid_items" };
+    items.push({
+      companyId: order.companyId,
+      branchId: order.branchId,
+      orderId: order.id,
+      productId: product.id,
+      productName: product.name,
+      unitPriceCents: product.priceCents,
+      quantity: item.quantity,
+      subtotalCents: product.priceCents * item.quantity,
+    });
+  }
+
+  const totalCents = items.reduce((sum, item) => sum + item.subtotalCents, 0);
+  const changeAmountCents =
+    order.paymentMethod === "CASH" && order.cashPaymentAmountCents !== null
+      ? Math.max(0, order.cashPaymentAmountCents - totalCents)
+      : null;
+
+  const updated = await prisma.$transaction(async (tx) => {
+    await tx.orderItem.deleteMany({ where: { orderId: order.id } });
+    await tx.orderItem.createMany({ data: items });
+    return tx.order.update({
+      where: { id: order.id },
+      data: { subtotalCents: totalCents, totalCents, changeAmountCents },
+    });
+  });
+
+  // No es un cambio de estado (from/to quedan iguales), pero reusar
+  // OrderStatusEvent para esto deja la edición en el mismo historial que ya
+  // se muestra en el panel, en vez de necesitar una tabla nueva solo para esto.
+  await prisma.orderStatusEvent.create({
+    data: {
+      companyId: order.companyId,
+      branchId: order.branchId,
+      orderId: order.id,
+      fromStatus: order.status,
+      toStatus: order.status,
+      changedByUserId: params.userId,
+      changedByAI: false,
+      reason: "Productos del pedido editados manualmente desde el panel.",
+    },
+  });
+
+  await notifyCustomer(
+    updated,
+    params.userId,
+    buildOrderItemsUpdatedMessage({
+      items,
+      totalCents,
+      paymentMethod: updated.paymentMethod,
+      cashPaymentAmountCents: updated.cashPaymentAmountCents,
+    }),
+  );
 
   return { status: "ok", order: updated };
 }

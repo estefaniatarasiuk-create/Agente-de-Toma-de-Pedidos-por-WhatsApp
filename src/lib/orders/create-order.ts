@@ -14,8 +14,12 @@ const DUPLICATE_ORDER_WINDOW_MINUTES = 10;
 
 // Compara los ítems de dos pedidos por producto+cantidad, sin importar el
 // orden — para detectar cuándo un "nuevo" pedido es en realidad el mismo
-// que uno reciente (ver el chequeo de duplicados más abajo).
-function haveSameItems(
+// que uno reciente (ver el chequeo de duplicados más abajo). Exportada:
+// apply-actions.ts la reusa para distinguir "el cliente está corrigiendo
+// este mismo pedido" (sigue el merge silencioso de acá abajo) de "el
+// cliente pidió algo genuinamente distinto mientras el anterior seguía
+// activo" (eso deriva a un humano — ver ese archivo).
+export function haveSameItems(
   existingItems: Array<{ productId: string | null; quantity: number }>,
   newItems: Array<{ productId: string; quantity: number }>,
 ): boolean {

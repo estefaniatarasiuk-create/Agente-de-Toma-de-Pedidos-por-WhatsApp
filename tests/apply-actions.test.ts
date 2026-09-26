@@ -906,3 +906,167 @@ describe("applyActions — avisa si el cliente paga en efectivo menos que el tot
     expect(confirmedText).not.toContain("de cambio");
   });
 });
+
+// Pedido explícito del usuario (mejora al panel de operación): si un
+// cliente que ya tiene un pedido activo (sin entregar) confirma algo
+// DISTINTO a ese pedido, no se arma un segundo pedido separado por su
+// cuenta — se deriva a una persona para que lo sume al pedido original
+// desde el panel, en vez de duplicar pedidos de un mismo cliente.
+describe("applyActions — deriva a un humano en vez de duplicar el pedido si el cliente ya tiene uno activo", () => {
+  const companiesToCleanup: string[] = [];
+
+  afterAll(async () => {
+    for (const companyId of companiesToCleanup) await cleanupCompany(companyId);
+  });
+
+  async function createActiveOrder(params: {
+    companyId: string;
+    branchId: string;
+    conversationId: string;
+    customerPhone: string;
+    productId: string;
+    productName: string;
+    unitPriceCents: number;
+  }) {
+    return prisma.order.create({
+      data: {
+        companyId: params.companyId,
+        branchId: params.branchId,
+        conversationId: params.conversationId,
+        customerPhone: params.customerPhone,
+        customerName: "Cliente Test",
+        deliveryAddressRaw: "Calle Falsa 123",
+        status: "PENDING",
+        paymentMethod: "CASH",
+        subtotalCents: params.unitPriceCents,
+        totalCents: params.unitPriceCents,
+        delayMinutesAtOrder: 30,
+        estimatedDeliveryAt: new Date(Date.now() + 30 * 60_000),
+        items: {
+          create: [
+            {
+              companyId: params.companyId,
+              branchId: params.branchId,
+              productId: params.productId,
+              productName: params.productName,
+              unitPriceCents: params.unitPriceCents,
+              quantity: 1,
+              subtotalCents: params.unitPriceCents,
+            },
+          ],
+        },
+      },
+    });
+  }
+
+  it("no arma un segundo pedido con productos distintos: deriva y preserva el borrador para que el panel lo sume", async () => {
+    const { company, branch } = await createTestCompanyAndBranch();
+    companiesToCleanup.push(company.id);
+    const chipa = await prisma.product.create({
+      data: { companyId: company.id, branchId: branch.id, name: "Chipa", priceCents: 300000 },
+    });
+    const coca = await prisma.product.create({
+      data: { companyId: company.id, branchId: branch.id, name: "Coca Cola 1.5L", priceCents: 280000 },
+    });
+    await prisma.paymentMethodConfig.create({
+      data: { companyId: company.id, branchId: branch.id, cashEnabled: true, transferEnabled: false },
+    });
+    const conversation = await prisma.conversation.create({
+      data: { companyId: company.id, branchId: branch.id, customerPhone: "5491100000020" },
+    });
+    await createActiveOrder({
+      companyId: company.id,
+      branchId: branch.id,
+      conversationId: conversation.id,
+      customerPhone: "5491100000020",
+      productId: chipa.id,
+      productName: chipa.name,
+      unitPriceCents: chipa.priceCents,
+    });
+
+    // El cliente pide algo DISTINTO (una Coca, no otra Chipa) mientras el
+    // pedido de Chipa sigue activo.
+    const draft = {
+      items: [{ productId: coca.id, productName: coca.name, unitPriceCents: coca.priceCents, quantity: 1 }],
+      customerName: "Cliente Test",
+      deliveryAddressRaw: "Calle Falsa 123",
+      deliveryLatitude: -34.6,
+      deliveryLongitude: -58.38,
+      paymentMethod: "CASH" as const,
+    };
+
+    const result = await applyActions({
+      companyId: company.id,
+      branchId: branch.id,
+      conversationId: conversation.id,
+      customerPhone: "5491100000020",
+      draft,
+      actions: [{ type: "confirm_order" }],
+      customerMessageText: "confirmo",
+    });
+
+    expect(result.orderCreated).toBe(false);
+    expect(result.requiresHuman).toBe(true);
+    expect(result.preserveDraftOnEscalation).toBe(true);
+    // El borrador con la Coca NO se limpia — es justo lo que el panel
+    // necesita mostrar para que el personal lo sume al pedido de Chipa.
+    expect(result.draft.items).toEqual(draft.items);
+
+    const orders = await prisma.order.findMany({ where: { branchId: branch.id, customerPhone: "5491100000020" } });
+    expect(orders).toHaveLength(1);
+    expect(orders[0].status).toBe("PENDING");
+  });
+
+  it("no deriva si es una corrección del mismo pedido (mismos ítems) — sigue el merge silencioso normal", async () => {
+    const { company, branch } = await createTestCompanyAndBranch();
+    companiesToCleanup.push(company.id);
+    const chipa = await prisma.product.create({
+      data: { companyId: company.id, branchId: branch.id, name: "Chipa", priceCents: 300000 },
+    });
+    await prisma.paymentMethodConfig.create({
+      data: { companyId: company.id, branchId: branch.id, cashEnabled: true, transferEnabled: false },
+    });
+    const conversation = await prisma.conversation.create({
+      data: { companyId: company.id, branchId: branch.id, customerPhone: "5491100000021" },
+    });
+    await createActiveOrder({
+      companyId: company.id,
+      branchId: branch.id,
+      conversationId: conversation.id,
+      customerPhone: "5491100000021",
+      productId: chipa.id,
+      productName: chipa.name,
+      unitPriceCents: chipa.priceCents,
+    });
+
+    // Mismos ítems que el pedido activo (ej. el cliente corrige el monto en
+    // efectivo, no está pidiendo algo nuevo) — esto NO tiene que derivar.
+    const draft = {
+      items: [{ productId: chipa.id, productName: chipa.name, unitPriceCents: chipa.priceCents, quantity: 1 }],
+      customerName: "Cliente Test",
+      deliveryAddressRaw: "Calle Falsa 123",
+      deliveryLatitude: -34.6,
+      deliveryLongitude: -58.38,
+      paymentMethod: "CASH" as const,
+      cashPaymentAmountCents: 2000000,
+    };
+
+    const result = await applyActions({
+      companyId: company.id,
+      branchId: branch.id,
+      conversationId: conversation.id,
+      customerPhone: "5491100000021",
+      draft,
+      actions: [{ type: "confirm_order" }],
+      customerMessageText: "confirmo",
+    });
+
+    expect(result.requiresHuman).toBe(false);
+    expect(result.orderCreated).toBe(true);
+    // Se actualizó el pedido existente (merge silencioso de
+    // create-order.ts), no se creó uno nuevo.
+    const orders = await prisma.order.findMany({ where: { branchId: branch.id, customerPhone: "5491100000021" } });
+    expect(orders).toHaveLength(1);
+    expect(orders[0].cashPaymentAmountCents).toBe(2000000);
+  });
+});

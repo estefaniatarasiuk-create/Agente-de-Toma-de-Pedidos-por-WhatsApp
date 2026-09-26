@@ -133,3 +133,30 @@ export function buildOrderOnTheWayMessage(): string {
 export function buildOrderCancelledByCompanyMessage(reason: string): string {
   return `Tuvimos que cancelar tu pedido: ${reason}. Disculpá las molestias — si querés, podés hacer el pedido de nuevo.`;
 }
+
+// Pedido de una persona del local editando los productos de un pedido ya
+// confirmado desde el panel (ej. para sumarle algo que el cliente pidió
+// más tarde) — el cliente tiene que enterarse del cambio y del total nuevo.
+export function buildOrderItemsUpdatedMessage(params: {
+  items: Array<{ productName: string; quantity: number; subtotalCents: number }>;
+  totalCents: number;
+  paymentMethod: "CASH" | "TRANSFER";
+  cashPaymentAmountCents?: number | null;
+}): string {
+  const lines = ["Actualizamos tu pedido:"];
+  for (const item of params.items) {
+    lines.push(`- ${item.quantity}x ${item.productName}: ${formatCentsAsArs(item.subtotalCents)}`);
+  }
+  lines.push(`Nuevo total: ${formatCentsAsArs(params.totalCents)}.`);
+  if (
+    params.paymentMethod === "CASH" &&
+    params.cashPaymentAmountCents !== undefined &&
+    params.cashPaymentAmountCents !== null &&
+    params.cashPaymentAmountCents < params.totalCents
+  ) {
+    lines.push(
+      `Ojo: nos habías dicho que ibas a pagar con ${formatCentsAsArs(params.cashPaymentAmountCents)} — con el pedido actualizado, todavía faltarían ${formatCentsAsArs(params.totalCents - params.cashPaymentAmountCents)} para completar el pago.`,
+    );
+  }
+  return lines.join("\n");
+}

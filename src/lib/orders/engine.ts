@@ -239,7 +239,7 @@ async function processInboundMessageLocked(params: { conversationId: string; mes
     return;
   }
 
-  const { draft: updatedDraft, correctionNotes, extras, requiresHuman, orderCreated } = await applyActions({
+  const { draft: updatedDraft, correctionNotes, extras, requiresHuman, orderCreated, preserveDraftOnEscalation } = await applyActions({
     companyId: conversation.companyId,
     branchId: conversation.branchId,
     conversationId: conversation.id,
@@ -262,7 +262,11 @@ async function processInboundMessageLocked(params: { conversationId: string; mes
     // resucitar solo cuando la IA retoma el control.
     await prisma.conversation.update({
       where: { id: conversation.id },
-      data: { status: "REQUIRES_ATTENTION", draftOrder: { items: [] }, currentStep: null },
+      data: {
+        status: "REQUIRES_ATTENTION",
+        draftOrder: preserveDraftOnEscalation ? (updatedDraft as unknown as object) : { items: [] },
+        currentStep: preserveDraftOnEscalation ? computeCurrentStep(updatedDraft) : null,
+      },
     });
     await sendText(correctionNotes.length > 0 ? correctionNotes.join("\n\n") : buildRequiresHumanMessage());
     return;

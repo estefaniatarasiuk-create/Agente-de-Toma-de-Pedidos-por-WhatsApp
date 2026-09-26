@@ -1,6 +1,6 @@
 import { describe, it, expect, afterAll } from "vitest";
 import { prisma } from "@/lib/prisma";
-import { advanceOrderStatus, cancelOrder, validateOrderPayment } from "@/lib/orders/order-transitions";
+import { advanceOrderStatus, cancelOrder, updateOrderItems, validateOrderPayment } from "@/lib/orders/order-transitions";
 import { createTestCompanyAndBranch, cleanupCompany } from "./fixtures";
 
 // Rutas críticas del tablero de operación (Fase 4): mover el estado de un
@@ -130,5 +130,133 @@ describe("order-transitions", () => {
     const delivered = await createOrder(branch.id, company.id, { status: "DELIVERED" });
     const resultDelivered = await cancelOrder({ branchId: branch.id, orderId: delivered.id, userId: user.id, reason: "x" });
     expect(resultDelivered.status).toBe("invalid_transition");
+  });
+});
+
+// Edición de productos de un pedido ya confirmado desde el panel (pedido
+// explícito del usuario): típicamente para sumar algo que el cliente pidió
+// por WhatsApp después de confirmar el pedido original, sin armar uno aparte.
+describe("order-transitions — updateOrderItems", () => {
+  const companiesToCleanup: string[] = [];
+
+  afterAll(async () => {
+    for (const companyId of companiesToCleanup) await cleanupCompany(companyId);
+  });
+
+  async function createOrder(branchId: string, companyId: string, overrides?: Partial<{ status: "WAITING_RECEIPT" | "PENDING" | "PREPARING" | "ON_THE_WAY" | "DELIVERED" | "CANCELLED" }>) {
+    const customerPhone = `549110001${Math.floor(Math.random() * 9000 + 1000)}`;
+    const conversation = await prisma.conversation.create({ data: { companyId, branchId, customerPhone } });
+    return prisma.order.create({
+      data: {
+        companyId,
+        branchId,
+        conversationId: conversation.id,
+        customerPhone,
+        customerName: "Cliente Test",
+        deliveryAddressRaw: "Calle Falsa 123",
+        status: overrides?.status ?? "PENDING",
+        paymentMethod: "CASH",
+        subtotalCents: 300000,
+        totalCents: 300000,
+        delayMinutesAtOrder: 40,
+        estimatedDeliveryAt: new Date(Date.now() + 40 * 60_000),
+      },
+    });
+  }
+
+  it("recalcula el total desde el catálogo actual (nunca de un precio recibido) y ajusta el vuelto", async () => {
+    const { company, branch } = await createTestCompanyAndBranch();
+    companiesToCleanup.push(company.id);
+    const user = await prisma.user.create({
+      data: { companyId: company.id, email: `op-${Date.now()}@test.com`, passwordHash: "x", name: "Operador" },
+    });
+    const product = await prisma.product.create({
+      data: { companyId: company.id, branchId: branch.id, name: "Chipa", priceCents: 300000 },
+    });
+    const otherProduct = await prisma.product.create({
+      data: { companyId: company.id, branchId: branch.id, name: "Coca Cola 1.5L", priceCents: 280000 },
+    });
+    const order = await createOrder(branch.id, company.id, { status: "PENDING" });
+    await prisma.order.update({ where: { id: order.id }, data: { cashPaymentAmountCents: 1000000 } });
+    await prisma.orderItem.create({
+      data: {
+        companyId: company.id,
+        branchId: branch.id,
+        orderId: order.id,
+        productId: product.id,
+        productName: product.name,
+        unitPriceCents: product.priceCents,
+        quantity: 1,
+        subtotalCents: product.priceCents,
+      },
+    });
+
+    const result = await updateOrderItems({
+      branchId: branch.id,
+      orderId: order.id,
+      userId: user.id,
+      items: [
+        { productId: product.id, quantity: 2 },
+        { productId: otherProduct.id, quantity: 1 },
+      ],
+    });
+
+    expect(result.status).toBe("ok");
+    if (result.status === "ok") {
+      const expectedTotal = product.priceCents * 2 + otherProduct.priceCents;
+      expect(result.order.totalCents).toBe(expectedTotal);
+      expect(result.order.subtotalCents).toBe(expectedTotal);
+      expect(result.order.changeAmountCents).toBe(1000000 - expectedTotal);
+    }
+
+    const items = await prisma.orderItem.findMany({ where: { orderId: order.id } });
+    expect(items).toHaveLength(2);
+
+    // El cliente recibe un WhatsApp avisando el cambio y el nuevo total.
+    const messages = await prisma.message.findMany({
+      where: { conversationId: order.conversationId!, direction: "OUTBOUND" },
+    });
+    expect(messages.some((m) => m.textContent?.includes("Actualizamos tu pedido"))).toBe(true);
+
+    // Queda en el historial del pedido, aunque no cambie de estado.
+    const events = await prisma.orderStatusEvent.findMany({ where: { orderId: order.id } });
+    expect(events.some((e) => e.reason?.includes("editados manualmente") && e.changedByUserId === user.id)).toBe(true);
+  });
+
+  it("no permite editar un pedido ya entregado o cancelado", async () => {
+    const { company, branch } = await createTestCompanyAndBranch();
+    companiesToCleanup.push(company.id);
+    const user = await prisma.user.create({
+      data: { companyId: company.id, email: `op-${Date.now()}@test.com`, passwordHash: "x", name: "Operador" },
+    });
+    const product = await prisma.product.create({
+      data: { companyId: company.id, branchId: branch.id, name: "Chipa", priceCents: 300000 },
+    });
+    const delivered = await createOrder(branch.id, company.id, { status: "DELIVERED" });
+
+    const result = await updateOrderItems({
+      branchId: branch.id,
+      orderId: delivered.id,
+      userId: user.id,
+      items: [{ productId: product.id, quantity: 1 }],
+    });
+    expect(result.status).toBe("invalid_transition");
+  });
+
+  it("devuelve invalid_items si algún producto no existe o está inactivo", async () => {
+    const { company, branch } = await createTestCompanyAndBranch();
+    companiesToCleanup.push(company.id);
+    const user = await prisma.user.create({
+      data: { companyId: company.id, email: `op-${Date.now()}@test.com`, passwordHash: "x", name: "Operador" },
+    });
+    const order = await createOrder(branch.id, company.id, { status: "PENDING" });
+
+    const result = await updateOrderItems({
+      branchId: branch.id,
+      orderId: order.id,
+      userId: user.id,
+      items: [{ productId: "no-existe", quantity: 1 }],
+    });
+    expect(result.status).toBe("invalid_items");
   });
 });

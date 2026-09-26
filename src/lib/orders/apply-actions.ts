@@ -4,7 +4,7 @@ import { findProductMatch, findSimilarProducts } from "@/lib/orders/catalog-matc
 import { validateDeliveryAddress } from "@/lib/orders/zone-validation";
 import { distanceKm } from "@/lib/geocoding";
 import { parsePriceToCents } from "@/lib/validations/product";
-import { createOrderFromDraft } from "@/lib/orders/create-order";
+import { createOrderFromDraft, haveSameItems } from "@/lib/orders/create-order";
 import { computeCurrentStep, getMissingOrderFields, looksLikeConfirmationText, MISSING_FIELD_LABEL } from "@/lib/orders/draft-step";
 import {
   buildAmbiguousAddressMessage,
@@ -29,6 +29,13 @@ export type ApplyActionsResult = {
   // Solo presente si orderCreated es true — para poder adjuntarle el
   // comprobante al pedido recién creado sin tener que volver a buscarlo.
   orderId?: string;
+  // Pedido explícito del usuario: cuando se deriva a un humano porque el
+  // cliente ya tiene un pedido activo y confirmó algo adicional (ver más
+  // abajo), el borrador NO se limpia como en cualquier otra derivación —
+  // es justo lo que el personal necesita ver en el panel para sumarlo al
+  // pedido original. engine.ts usa esta bandera para decidir si limpia el
+  // borrador al escalar o no.
+  preserveDraftOnEscalation?: boolean;
 };
 
 export async function applyActions(params: {
@@ -303,6 +310,37 @@ export async function applyActions(params: {
       if (!params.assumeConfirmed && !looksLikeConfirmationText(params.customerMessageText ?? "")) {
         correctionNotes.push(`${buildFullOrderSummary(draft)}\n\n¿Confirmás este pedido?`);
         continue;
+      }
+
+      // Pedido explícito del usuario: si el cliente ya tiene un pedido
+      // activo (sin entregar) y confirma algo DISTINTO a ese pedido, no se
+      // arma un segundo pedido separado por su cuenta — se deriva a una
+      // persona para que lo sume al pedido original desde el panel, en vez
+      // de duplicar pedidos de un mismo cliente. Si los ítems son
+      // IDÉNTICOS al pedido activo, esto es en realidad una corrección
+      // (ej. "me equivoqué, son 20 mil no 20") y sigue su curso normal: el
+      // merge silencioso de create-order.ts ya la maneja.
+      const activeOrder = await prisma.order.findFirst({
+        where: {
+          branchId: params.branchId,
+          customerPhone: params.customerPhone,
+          status: { in: ["WAITING_RECEIPT", "PENDING", "PREPARING", "ON_THE_WAY"] },
+        },
+        orderBy: { createdAt: "desc" },
+        include: { items: true },
+      });
+      if (activeOrder && !haveSameItems(activeOrder.items, draft.items)) {
+        correctionNotes.push(
+          "Veo que ya tenés un pedido en curso — le aviso a alguien del local para que te sume esto ahí. En breve te confirman.",
+        );
+        return {
+          draft,
+          correctionNotes,
+          extras,
+          requiresHuman: true,
+          orderCreated: false,
+          preserveDraftOnEscalation: true,
+        };
       }
 
       const result = await createOrderFromDraft({

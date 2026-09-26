@@ -15,9 +15,15 @@ const STATUS_BADGE: Record<ConversationStatus, { label: string; className: strin
 
 const POLL_INTERVAL_MS = 8000;
 
-export function ConversationsInbox({ initialConversations }: { initialConversations: ConversationWithPreview[] }) {
+export function ConversationsInbox({
+  initialConversations,
+  preselectedId,
+}: {
+  initialConversations: ConversationWithPreview[];
+  preselectedId?: string | null;
+}) {
   const [conversations, setConversations] = useState(initialConversations);
-  const [selectedId, setSelectedId] = useState<string | null>(initialConversations[0]?.id ?? null);
+  const [selectedId, setSelectedId] = useState<string | null>(preselectedId ?? initialConversations[0]?.id ?? null);
 
   async function refresh() {
     const response = await fetch("/api/conversaciones");

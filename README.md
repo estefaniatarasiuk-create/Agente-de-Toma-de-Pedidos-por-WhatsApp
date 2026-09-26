@@ -287,6 +287,20 @@ la columna que corresponda.
    cancelación automática del circuito de comprobante (que nunca cancela
    si ya hay `receiptUrl`), esta cancelación manual sí puede hacerse en
    cualquier momento — es una decisión de una persona, no una regla dura.
+5. Botón **"Hablar con el cliente"**: pausa la IA de esa conversación y te
+   lleva directo a `/conversaciones` con el chat ya abierto — no hace falta
+   buscarlo a mano en la lista.
+6. Botón **"Editar productos"** (en cualquier pedido no entregado ni
+   cancelado): agregar, quitar o cambiar la cantidad de los productos de un
+   pedido ya confirmado. El precio siempre sale del catálogo actual, el
+   total y el vuelto se recalculan solos, y el cliente recibe un WhatsApp
+   avisando el cambio y el total nuevo.
+7. Si un cliente que ya tiene un pedido activo pide algo **distinto** por
+   WhatsApp (no una corrección del mismo pedido), la IA ya no arma un
+   segundo pedido por su cuenta: deriva la conversación a atención humana y
+   el pedido original muestra un aviso ("Este cliente pidió más por
+   WhatsApp...") con los productos pendientes — un clic los suma al pedido
+   con "Editar productos".
 
 **Conversaciones** (`/conversaciones`): lista de conversaciones a la
 izquierda (las que están en `REQUIRES_ATTENTION` aparecen primero), chat

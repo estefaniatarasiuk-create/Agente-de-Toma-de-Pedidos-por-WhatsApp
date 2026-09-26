@@ -37,9 +37,21 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   const conversation = await prisma.conversation.findFirst({ where: { id, branchId: context.branchId } });
   if (!conversation) return NextResponse.json({ error: "Conversación no encontrada." }, { status: 404 });
 
+  // Al resolver una conversación que necesitaba atención, se limpia
+  // cualquier borrador que hubiera quedado (normalmente ya está vacío —
+  // engine.ts lo limpia al escalar — salvo en el caso de un pedido
+  // adicional pendiente de sumar a mano, ver apply-actions.ts: ahí SÍ se
+  // preserva a propósito para que el panel lo muestre). Si no se limpiara
+  // acá, esos ítems ya sumados a mano podrían resucitar solos en el
+  // próximo pedido que arme la IA.
+  const isResolving = conversation.status === "REQUIRES_ATTENTION" && parsed.data.status === "ACTIVE";
+
   const updated = await prisma.conversation.update({
     where: { id: conversation.id },
-    data: { status: parsed.data.status },
+    data: {
+      status: parsed.data.status,
+      ...(isResolving ? { draftOrder: { items: [] }, currentStep: null } : {}),
+    },
   });
 
   return NextResponse.json({ conversation: updated });

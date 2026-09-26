@@ -2,8 +2,16 @@ import { prisma } from "@/lib/prisma";
 import { requireBranchContext } from "@/lib/branch-context";
 import { ConversationsInbox } from "./conversations-inbox";
 
-export default async function ConversacionesPage() {
+export default async function ConversacionesPage({
+  searchParams,
+}: {
+  // Permite entrar directo a una conversación puntual (ej. desde el botón
+  // "Hablar con el cliente" del detalle de un pedido), en vez de forzar a
+  // buscarla a mano en la lista.
+  searchParams: Promise<{ conversacion?: string }>;
+}) {
   const context = await requireBranchContext();
+  const { conversacion } = await searchParams;
 
   const conversations = context
     ? await prisma.conversation.findMany({
@@ -14,5 +22,5 @@ export default async function ConversacionesPage() {
       })
     : [];
 
-  return <ConversationsInbox initialConversations={conversations} />;
+  return <ConversationsInbox initialConversations={conversations} preselectedId={conversacion ?? null} />;
 }
