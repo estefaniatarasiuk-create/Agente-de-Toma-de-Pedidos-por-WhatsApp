@@ -13,6 +13,7 @@ import { draftOrderStateSchema, llmTurnResponseSchema, EMPTY_DRAFT_ORDER } from 
 import { buildRequiresHumanMessage } from "@/lib/orders/messages";
 import { scheduleConversationExpiry } from "@/lib/jobs/queues";
 import { computeCurrentStep, isNewOrderIntentText } from "@/lib/orders/draft-step";
+import { withConversationLock } from "@/lib/orders/conversation-lock";
 import type { Message } from "@prisma/client";
 
 const HISTORY_LENGTH = 12;
@@ -30,7 +31,18 @@ function messageToHistoryText(message: Message): string {
 // punto de entrada único del motor de pedidos: decide si corresponde
 // responder automáticamente por horario, si un archivo es el comprobante de
 // un pedido en curso, o si toca invocar a la IA para seguir la conversación.
+//
+// Serializado por conversación (ver conversation-lock.ts): si el cliente
+// manda dos mensajes casi juntos, el webhook de Meta puede llegar a
+// procesarlos en paralelo — sin esto, el segundo turno podía leer el
+// borrador antes de que el primero terminara de guardarlo, y actuar sobre
+// un estado viejo (bug real: un producto recién agregado en un mensaje, el
+// mensaje siguiente lo daba por "no disponible" de la nada).
 export async function processInboundMessage(params: { conversationId: string; messageId: string }): Promise<void> {
+  return withConversationLock(params.conversationId, () => processInboundMessageLocked(params));
+}
+
+async function processInboundMessageLocked(params: { conversationId: string; messageId: string }): Promise<void> {
   const conversation = await prisma.conversation.findUniqueOrThrow({
     where: { id: params.conversationId },
     include: { branch: { include: { whatsappLine: true } } },
