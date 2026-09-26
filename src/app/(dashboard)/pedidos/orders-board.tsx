@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import type { Order, OrderItem, OrderStatus } from "@prisma/client";
 import { formatCentsAsArs } from "@/lib/money";
 import { OrderDetailPanel } from "./order-detail-panel";
@@ -37,11 +38,16 @@ export function OrdersBoard({ initialOrders }: { initialOrders: OrderWithItems[]
 
   return (
     <div className="flex h-screen flex-col p-8">
-      <div className="mb-4 shrink-0">
-        <h1 className="text-2xl font-semibold text-gray-900">Pedidos</h1>
-        <p className="mt-1 text-sm text-gray-500">
-          Tablero en vivo de todos los pedidos de la sucursal, agrupados por estado.
-        </p>
+      <div className="mb-4 flex shrink-0 items-start justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold text-gray-900">Pedidos</h1>
+          <p className="mt-1 text-sm text-gray-500">
+            Tablero en vivo de todos los pedidos de la sucursal, agrupados por estado.
+          </p>
+        </div>
+        <Link href="/pedidos/historial" className="text-sm font-medium text-green-700 hover:underline">
+          Ver historial y exportar →
+        </Link>
       </div>
 
       {orders.length === 0 ? (

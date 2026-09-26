@@ -27,7 +27,11 @@ WhatsApp` (ver historias de usuario E1–E11).
 - [x] **Fase 2** — Vinculación de WhatsApp (Embedded Signup, webhooks).
 - [x] **Fase 3** — Motor de pedidos (máquina de estados, IA, comprobante, worker de BullMQ).
 - [x] **Fase 4** — Operación (tablero de pedidos, conversaciones en vivo).
-- [ ] Fase 5 — Métricas y cierre.
+- [~] **Fase 5** — Métricas y cierre. Alcance confirmado con el cliente: métricas
+  de **ventas** (pedidos y facturación por día, ticket promedio, efectivo vs.
+  transferencia) e **historial de pedidos** con filtros y exportación a CSV —
+  hecho. Quedan afuera del alcance por ahora: productos más pedidos, desempeño
+  de la IA, tiempos de entrega.
 
 ## Setup
 
@@ -316,6 +320,29 @@ la barra lateral (el navegador va a pedir el permiso). A partir de ahí:
 3. El tablero de pedidos, la lista de conversaciones y el chat abierto se
    actualizan solos cada pocos segundos (sondeo periódico) — no hace falta
    recargar la página para ver un mensaje o pedido nuevo.
+
+### Verificación de la Fase 5 (Ventas + historial)
+
+**Métricas** (`/metricas`): pedidos, facturación, ticket promedio y el
+desglose efectivo vs. transferencia de la sucursal, con selector de rango
+(Hoy / Últimos 7 días / Últimos 30 días / Personalizado) y un gráfico de
+facturación por día.
+
+1. Confirmá un par de pedidos de prueba (efectivo y transferencia) y
+   entrá a `/metricas` → tienen que sumar en "Pedidos" y "Facturación" del
+   rango "Hoy".
+2. Cambiá el rango a "Últimos 7 días" o "Personalizado" (con fechas elegidas
+   a mano) → los números se recalculan sin recargar la página.
+3. Los pedidos cancelados nunca suman acá (no son una venta real); un pedido
+   por transferencia sí suma aunque todavía esté `WAITING_RECEIPT` — ya fue
+   confirmado por el cliente, solo falta validar el comprobante.
+
+**Historial de pedidos** (`/pedidos/historial`, enlazado desde el tablero de
+`/pedidos`): lista completa y paginada de pedidos, con filtros por fecha
+(desde/hasta), cliente (nombre o teléfono) y estado, y un botón "Exportar
+CSV" que descarga exactamente lo que muestran los filtros activos (abrí el
+CSV en Excel: las fechas/horas ya están en huso horario de la sucursal, no
+UTC).
 
 ## Pendientes de pulido (para el cierre, Fase 5)
 
