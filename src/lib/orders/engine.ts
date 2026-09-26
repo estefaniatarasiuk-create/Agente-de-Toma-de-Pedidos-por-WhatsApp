@@ -12,7 +12,7 @@ import { extractJsonBlock, type LlmMessage } from "@/lib/ai/provider";
 import { draftOrderStateSchema, llmTurnResponseSchema, EMPTY_DRAFT_ORDER } from "@/lib/validations/order-engine";
 import { buildRequiresHumanMessage } from "@/lib/orders/messages";
 import { scheduleConversationExpiry } from "@/lib/jobs/queues";
-import { computeCurrentStep } from "@/lib/orders/draft-step";
+import { computeCurrentStep, isNewOrderIntentText } from "@/lib/orders/draft-step";
 import type { Message } from "@prisma/client";
 
 const HISTORY_LENGTH = 12;
@@ -103,9 +103,26 @@ export async function processInboundMessage(params: { conversationId: string; me
     return;
   }
 
-  const draft = draftOrderStateSchema.safeParse(conversation.draftOrder).success
+  let draft = draftOrderStateSchema.safeParse(conversation.draftOrder).success
     ? draftOrderStateSchema.parse(conversation.draftOrder)
     : EMPTY_DRAFT_ORDER;
+
+  const message = await prisma.message.findUniqueOrThrow({ where: { id: params.messageId } });
+
+  // Bug real: un pedido anterior abandonado sin confirmar (bloqueado, o
+  // simplemente sin cerrar) dejaba sus ítems/domicilio/pago en el borrador
+  // — si el cliente después arrancaba un pedido totalmente nuevo, esos
+  // datos viejos se sumaban en silencio al nuevo. "Quiero pedir"/"hacer un
+  // pedido" es una señal clara e inequívoca de que el cliente quiere
+  // empezar de cero, así que no dependemos de que la IA se dé cuenta sola
+  // de que hay que descartar lo anterior.
+  if (
+    message.textContent &&
+    isNewOrderIntentText(message.textContent) &&
+    (draft.items.length > 0 || draft.deliveryAddressRaw || draft.paymentMethod)
+  ) {
+    draft = { items: [] };
+  }
 
   // El nombre de perfil de WhatsApp (Message/Conversation.customerName) es un
   // dato ya confiable que llega solo con el primer mensaje — no depende de
@@ -119,7 +136,6 @@ export async function processInboundMessage(params: { conversationId: string; me
   // 2. Comprobante de un pedido en curso: si hay un pedido "esperando
   // comprobante" y este mensaje es una imagen/documento, se adjunta directo
   // (spec §3.4) sin pasar por la IA.
-  const message = await prisma.message.findUniqueOrThrow({ where: { id: params.messageId } });
   if (message.direction === "INBOUND" && (message.messageType === "IMAGE" || message.messageType === "DOCUMENT") && message.mediaUrl) {
     const waitingOrder = await prisma.order.findFirst({
       where: { branchId: conversation.branchId, customerPhone: conversation.customerPhone, status: "WAITING_RECEIPT", receiptUrl: null },
@@ -148,6 +164,7 @@ export async function processInboundMessage(params: { conversationId: string; me
         customerPhone: conversation.customerPhone,
         draft,
         actions: [{ type: "confirm_order" }],
+        assumeConfirmed: true,
       });
       if (confirmResult.orderCreated && confirmResult.orderId) {
         await sendExtras(confirmResult.extras);
@@ -216,6 +233,7 @@ export async function processInboundMessage(params: { conversationId: string; me
     customerPhone: conversation.customerPhone,
     draft,
     actions: parsedResponse.actions,
+    customerMessageText: message.textContent ?? "",
   });
 
   if (requiresHuman) {

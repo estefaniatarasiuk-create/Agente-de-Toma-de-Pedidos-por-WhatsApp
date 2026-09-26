@@ -34,7 +34,13 @@ export function buildDraftSummary(draft: DraftOrderState): string {
 export function buildFullOrderSummary(draft: DraftOrderState): string {
   const lines = [buildDraftSummary(draft)];
   if (draft.customerName) lines.push(`Nombre: ${draft.customerName}`);
-  if (draft.deliveryAddressRaw) lines.push(`Domicilio: ${draft.deliveryAddressRaw}`);
+  // Se muestra la dirección ya normalizada por el geocoding (con
+  // localidad/barrio), no la que escribió el cliente tal cual — así el
+  // cliente puede notar acá mismo, en el resumen, si la geocodificación se
+  // equivocó de zona con un nombre de calle repetido (antes esto se
+  // avisaba en un mensaje aparte, apenas daba la dirección; ver
+  // apply-actions.ts para el porqué del cambio).
+  if (draft.deliveryAddressRaw) lines.push(`Domicilio: ${draft.deliveryAddressNormalized ?? draft.deliveryAddressRaw}`);
   if (draft.paymentMethod) {
     const paymentLabel = draft.paymentMethod === "CASH" ? "Efectivo" : "Transferencia";
     const cashDetail =

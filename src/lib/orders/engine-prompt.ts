@@ -145,7 +145,7 @@ ${RESPONSE_FORMAT_INSTRUCTIONS}
 Estado actual del pedido en construcción (validado por el sistema, podés citarlo tal cual):
 ${draftSummary}
 Nombre del cliente: ${params.draft.customerName ? params.draft.customerName : "TODAVÍA NO LO DIJO — no armes un resumen ni pidas confirmar hasta tenerlo"}
-Domicilio de entrega: ${params.draft.deliveryAddressRaw ? `${params.draft.deliveryAddressRaw}${params.draft.deliveryAddressNotes ? ` (${params.draft.deliveryAddressNotes})` : ""}` : "TODAVÍA NO LO DIJO — no armes un resumen ni pidas confirmar hasta tenerlo"}
+Domicilio de entrega: ${params.draft.deliveryAddressRaw ? `${params.draft.deliveryAddressNormalized ?? params.draft.deliveryAddressRaw}${params.draft.deliveryAddressNotes ? ` (${params.draft.deliveryAddressNotes})` : ""}` : "TODAVÍA NO LO DIJO — no armes un resumen ni pidas confirmar hasta tenerlo"}
 Medio de pago: ${params.draft.paymentMethod ? (params.draft.paymentMethod === "CASH" ? "efectivo" : "transferencia") : "TODAVÍA NO LO ELIGIÓ — no armes un resumen ni pidas confirmar hasta tenerlo"}
 ${activeOrderText ? `\nEste cliente ya tiene un pedido en curso (independiente del que se esté armando arriba): ${activeOrderText} Si pide agregar productos, NO se pueden sumar a ese pedido (ya está en preparación o en camino, no se puede modificar) — arma un PEDIDO NUEVO Y SEPARADO con lo que pida ahora, y avisale explícitamente en tu "reply" que eso le va a llegar en una entrega aparte del pedido que ya tiene en curso.` : ""}`;
 

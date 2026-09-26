@@ -24,6 +24,38 @@ export function getMissingOrderFields(draft: DraftOrderState): string[] {
   return missing;
 }
 
+// Frases típicas con las que un cliente arranca a pedir de nuevo ("quiero
+// pedir", "hacer un pedido", "otro pedido"). Bug real reportado en la Fase
+// 4: si un pedido anterior quedó bloqueado sin confirmar (ej. el cliente
+// intentó confirmar antes de tiempo y después se distrajo) o ya fue
+// cancelado/entregado, el borrador seguía teniendo esos ítems/datos viejos
+// — y si el cliente arrancaba un pedido totalmente nuevo, esos ítems
+// abandonados se sumaban en silencio al nuevo, inflando el total. Detectar
+// esta frase en código (no confiar en que la IA se dé cuenta sola, que en
+// la práctica no siempre pasa) y limpiar el borrador es la única forma
+// confiable de garantizar que un pedido nuevo arranca de cero.
+const NEW_ORDER_INTENT_RE =
+  /\b(quiero|quisiera|necesito)\s+(hacer\s+)?pedir\b|\b(hacer|armar|realizar)\s+(un|otro)\s+pedido\b|\botro\s+pedido\b/i;
+
+export function isNewOrderIntentText(text: string): boolean {
+  return NEW_ORDER_INTENT_RE.test(text);
+}
+
+// Bug real: la IA confirmó un pedido cuando el cliente escribió "nada más.
+// Cuánto es" — una pregunta por el total, no una confirmación. Como el
+// pedido ya estaba completo y nada cambió en ese turno, ninguna de las
+// otras defensas de código lo detectó. Esta es la última: confirm_order
+// solo tiene efecto si el mensaje del cliente en este turno realmente
+// suena a una confirmación explícita — si no, no cuenta como intento
+// fallido (no escala a un humano por esto), simplemente se le vuelve a
+// mostrar el resumen.
+const CONFIRMATION_RE =
+  /\b(s[ií]+|sip|dale|confirmo|confirmado|confirmar|ok|okay|okey|oka|listo|correcto|exacto|perfecto|de acuerdo|vale|as[ií] est[aá] bien|est[aá] bien|todo bien|todo correcto|qued[oó] bien|eso es|eso mismo|aceptado|joya)\b/i;
+
+export function looksLikeConfirmationText(text: string): boolean {
+  return CONFIRMATION_RE.test(text);
+}
+
 // Paso vigente de la máquina de estados del pedido en curso (spec §3.2).
 // Compartido entre engine.ts (para guardar Conversation.currentStep) y
 // apply-actions.ts (para exigir que confirm_order llegue en un turno

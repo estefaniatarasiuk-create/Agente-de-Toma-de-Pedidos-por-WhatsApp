@@ -5,7 +5,7 @@ import { validateDeliveryAddress } from "@/lib/orders/zone-validation";
 import { distanceKm } from "@/lib/geocoding";
 import { parsePriceToCents } from "@/lib/validations/product";
 import { createOrderFromDraft } from "@/lib/orders/create-order";
-import { computeCurrentStep, getMissingOrderFields, MISSING_FIELD_LABEL } from "@/lib/orders/draft-step";
+import { computeCurrentStep, getMissingOrderFields, looksLikeConfirmationText, MISSING_FIELD_LABEL } from "@/lib/orders/draft-step";
 import {
   buildAmbiguousAddressMessage,
   buildFullOrderSummary,
@@ -38,6 +38,13 @@ export async function applyActions(params: {
   customerPhone: string;
   draft: DraftOrderState;
   actions: LlmAction[];
+  // Texto del mensaje entrante que disparó este turno, para verificar que
+  // confirm_order realmente venga acompañado de algo que suene a una
+  // confirmación del cliente (ver más abajo). No hace falta si
+  // assumeConfirmed es true (ej. el comprobante de pago ya cuenta como
+  // confirmación implícita — ver engine.ts).
+  customerMessageText?: string;
+  assumeConfirmed?: boolean;
 }): Promise<ApplyActionsResult> {
   let draft: DraftOrderState = {
     ...params.draft,
@@ -145,17 +152,14 @@ export async function applyActions(params: {
           draft.deliveryLatitude = validation.latitude;
           draft.deliveryLongitude = validation.longitude;
 
-          if (!isSameLocationAsBefore) {
-            draftChangedThisTurn = true;
-            // Confirmarle al cliente el domicilio COMPLETO que entendimos
-            // (con localidad/barrio) es la única forma de que note si la
-            // geocodificación se equivocó de zona con un nombre de calle
-            // repetido — no alcanza con aceptarlo en silencio.
-            extras.push({
-              kind: "text",
-              text: `Anoté tu domicilio como: ${validation.formattedAddress}. Si no es el correcto, contame de nuevo con más detalle (localidad, entre qué calles, etc.).`,
-            });
-          }
+          if (!isSameLocationAsBefore) draftChangedThisTurn = true;
+          // Antes se mandaba acá un mensaje aparte ("Anoté tu domicilio
+          // como...") cada vez que se validaba una dirección — pedido del
+          // usuario: sonaba repetitivo entre saludo y resumen. La misma
+          // función de seguridad (que el cliente note si la geocodificación
+          // se equivocó de zona con un nombre de calle repetido) se cumple
+          // mostrando el domicilio COMPLETO ya normalizado en el resumen
+          // final del pedido, en vez de en un mensaje separado.
         } else if (validation.status === "out_of_zone") {
           correctionNotes.push(buildOutOfZoneMessage());
           // Fuera de zona: no tiene sentido seguir armando este pedido.
@@ -234,6 +238,19 @@ export async function applyActions(params: {
               : `¡Ya tengo todos los datos de tu pedido!\n\n${buildFullOrderSummary(draft)}\n\nSi está todo bien, confirmámelo en tu próximo mensaje para registrarlo.`,
           );
         }
+        continue;
+      }
+
+      // Bug real: la IA incluyó confirm_order en un turno donde el cliente
+      // solo preguntó "cuánto es" (no dijo nada que sonara a confirmar) —
+      // como el pedido ya estaba completo y sin cambios, las defensas de
+      // arriba no lo detectaron y el pedido se registró sin que el cliente
+      // lo hubiera pedido de verdad. Esto NO cuenta como un intento
+      // fallido del cliente (no suma a confirmAttempts ni puede escalar a
+      // un humano): es la IA actuando de más, así que solo se le vuelve a
+      // mostrar el resumen, sin penalizar nada.
+      if (!params.assumeConfirmed && !looksLikeConfirmationText(params.customerMessageText ?? "")) {
+        correctionNotes.push(`${buildFullOrderSummary(draft)}\n\n¿Confirmás este pedido?`);
         continue;
       }
 

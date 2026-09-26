@@ -167,6 +167,7 @@ describe("applyActions — add_item fija el total, no lo suma, y protege la conf
         { type: "add_item", productName: "Chipa", quantity: 9 },
         { type: "confirm_order" },
       ],
+      customerMessageText: "confirmo",
     });
 
     expect(result.orderCreated).toBe(true);
@@ -205,6 +206,7 @@ describe("applyActions — add_item fija el total, no lo suma, y protege la conf
       customerPhone: "5491100000002",
       draft,
       actions: [{ type: "confirm_order" }],
+      customerMessageText: "confirmo",
     });
 
     expect(result.orderCreated).toBe(true);
@@ -255,6 +257,7 @@ describe("applyActions — un pedido nuevo nunca hereda ítems de uno previo ya 
       customerPhone: "5491100000004",
       draft: firstDraft,
       actions: [{ type: "confirm_order" }],
+      customerMessageText: "confirmo",
     });
     expect(firstResult.orderCreated).toBe(true);
     expect(firstResult.draft.items).toEqual([]);
@@ -338,6 +341,7 @@ describe("applyActions — confirm_order exige un turno aparte del que completó
       customerPhone: "5491100000005",
       draft: result.draft,
       actions: [{ type: "confirm_order" }],
+      customerMessageText: "confirmo",
     });
     expect(secondResult.orderCreated).toBe(true);
   });
@@ -547,17 +551,19 @@ describe("applyActions — deriva a un humano si confirm_order se bloquea repeti
 });
 
 // Regresión: la IA reemite set_customer_info con la misma dirección (a
-// veces redactada un poco distinto) casi cada vez que resume el pedido —
-// sin este fix, cada repetición volvía a mandar "Anoté tu domicilio
-// como...", generando spam. Se compara por coordenadas, no por texto.
-describe("applyActions — no repite la confirmación de domicilio si sigue siendo el mismo lugar", () => {
+// veces redactada un poco distinto) casi cada vez que resume el pedido. Se
+// compara por coordenadas, no por texto, para no tratarlo como un cambio
+// real. Pedido del usuario: en vez de un mensaje aparte ("Anoté tu
+// domicilio como...") cada vez que se valida una dirección, el domicilio ya
+// normalizado se muestra directamente en el resumen del pedido.
+describe("applyActions — el domicilio validado no se vuelve a contar como cambio si sigue siendo el mismo lugar", () => {
   const companiesToCleanup: string[] = [];
 
   afterAll(async () => {
     for (const companyId of companiesToCleanup) await cleanupCompany(companyId);
   });
 
-  it("no vuelve a mandar el aviso de domicilio si la nueva geocodificación cae muy cerca de la anterior", async () => {
+  it("guarda el domicilio normalizado en el borrador, sin mandar un mensaje aparte", async () => {
     const { company, branch } = await createTestCompanyAndBranch();
     companiesToCleanup.push(company.id);
     await prisma.deliveryZone.create({
@@ -582,9 +588,38 @@ describe("applyActions — no repite la confirmación de domicilio si sigue sien
       draft: EMPTY_DRAFT_ORDER,
       actions: [{ type: "set_customer_info", address: "Av. de Mayo 700, entre Perón y Bolívar" }],
     });
-    expect(first.extras.some((extra) => extra.kind === "text" && extra.text.includes("Anoté tu domicilio"))).toBe(true);
+    expect(first.draft.deliveryAddressNormalized).toBe("Av. de Mayo 700, CABA");
+    expect(first.extras.some((extra) => extra.kind === "text" && extra.text.includes("Anoté tu domicilio"))).toBe(false);
+  });
 
-    // Mismo lugar (coordenadas casi idénticas), redactado distinto.
+  it("no bloquea confirm_order por el domicilio si la nueva geocodificación cae muy cerca de la anterior", async () => {
+    const { company, branch } = await createTestCompanyAndBranch();
+    companiesToCleanup.push(company.id);
+    await prisma.deliveryZone.create({
+      data: { companyId: company.id, branchId: branch.id, centerLatitude: -34.6083, centerLongitude: -58.3712, radiusKm: 5 },
+    });
+    const product = await prisma.product.create({
+      data: { companyId: company.id, branchId: branch.id, name: "Chipa", priceCents: 300000 },
+    });
+    await prisma.paymentMethodConfig.create({
+      data: { companyId: company.id, branchId: branch.id, cashEnabled: true, transferEnabled: false },
+    });
+    const conversation = await prisma.conversation.create({
+      data: { companyId: company.id, branchId: branch.id, customerPhone: "5491100000014" },
+    });
+
+    const draftReady = {
+      items: [{ productId: product.id, productName: product.name, unitPriceCents: product.priceCents, quantity: 1 }],
+      customerName: "Cliente Test",
+      deliveryAddressRaw: "Av. de Mayo 700, entre Perón y Bolívar",
+      deliveryAddressNormalized: "Av. de Mayo 700, CABA",
+      deliveryLatitude: -34.61,
+      deliveryLongitude: -58.3745,
+      paymentMethod: "CASH" as const,
+    };
+
+    // Mismo lugar (coordenadas casi idénticas), redactado distinto — no
+    // tiene que contar como un cambio real que bloquee la confirmación.
     geocodeAddressMock.mockResolvedValueOnce({
       latitude: -34.6101,
       longitude: -58.37455,
@@ -592,15 +627,107 @@ describe("applyActions — no repite la confirmación de domicilio si sigue sien
       partialMatch: false,
       fromCache: false,
     });
-    const second = await applyActions({
+    const result = await applyActions({
       companyId: company.id,
       branchId: branch.id,
       conversationId: conversation.id,
-      customerPhone: "5491100000006",
-      draft: first.draft,
-      actions: [{ type: "set_customer_info", address: "Av. de Mayo 700" }],
+      customerPhone: "5491100000014",
+      draft: draftReady,
+      actions: [{ type: "set_customer_info", address: "Av. de Mayo 700" }, { type: "confirm_order" }],
+      customerMessageText: "dale, confirmo",
     });
-    expect(second.extras.some((extra) => extra.kind === "text" && extra.text.includes("Anoté tu domicilio"))).toBe(false);
+
+    expect(result.orderCreated).toBe(true);
+    expect(result.extras.some((extra) => extra.kind === "text" && extra.text.includes("Anoté tu domicilio"))).toBe(false);
+  });
+});
+
+// Regresión de un caso real: el cliente escribió "nada más. Cuánto es" — una
+// pregunta por el total, no una confirmación — y la IA igual incluyó
+// confirm_order. Como el pedido ya estaba completo y sin cambios en ese
+// turno, ninguna otra defensa lo detectó y el pedido se registró sin que el
+// cliente lo hubiera pedido de verdad. Ahora confirm_order exige que el
+// mensaje del cliente suene a una confirmación real.
+describe("applyActions — no confirma si el cliente no dijo nada que suene a una confirmación", () => {
+  const companiesToCleanup: string[] = [];
+
+  afterAll(async () => {
+    for (const companyId of companiesToCleanup) await cleanupCompany(companyId);
+  });
+
+  it("no crea el pedido si el mensaje del cliente es una pregunta, no una confirmación", async () => {
+    const { company, branch } = await createTestCompanyAndBranch();
+    companiesToCleanup.push(company.id);
+    const product = await prisma.product.create({
+      data: { companyId: company.id, branchId: branch.id, name: "Chipa", priceCents: 300000 },
+    });
+    await prisma.paymentMethodConfig.create({
+      data: { companyId: company.id, branchId: branch.id, cashEnabled: true, transferEnabled: false },
+    });
+    const conversation = await prisma.conversation.create({
+      data: { companyId: company.id, branchId: branch.id, customerPhone: "5491100000012" },
+    });
+
+    const draft = {
+      items: [{ productId: product.id, productName: product.name, unitPriceCents: product.priceCents, quantity: 2 }],
+      customerName: "Cliente Test",
+      deliveryAddressRaw: "Calle Falsa 123",
+      deliveryLatitude: -34.6,
+      deliveryLongitude: -58.38,
+      paymentMethod: "CASH" as const,
+    };
+
+    const result = await applyActions({
+      companyId: company.id,
+      branchId: branch.id,
+      conversationId: conversation.id,
+      customerPhone: "5491100000012",
+      draft,
+      actions: [{ type: "confirm_order" }],
+      customerMessageText: "nada mas. Cuanto es",
+    });
+
+    expect(result.orderCreated).toBe(false);
+    // No es un intento fallido del cliente: no debe sumar al contador de
+    // escalamiento (la IA actuó de más, el cliente no hizo nada mal).
+    expect(result.draft.confirmAttempts ?? 0).toBe(0);
+    const orders = await prisma.order.findMany({ where: { branchId: branch.id } });
+    expect(orders).toHaveLength(0);
+  });
+
+  it("sí crea el pedido si el cliente responde con algo que suena a confirmación", async () => {
+    const { company, branch } = await createTestCompanyAndBranch();
+    companiesToCleanup.push(company.id);
+    const product = await prisma.product.create({
+      data: { companyId: company.id, branchId: branch.id, name: "Chipa", priceCents: 300000 },
+    });
+    await prisma.paymentMethodConfig.create({
+      data: { companyId: company.id, branchId: branch.id, cashEnabled: true, transferEnabled: false },
+    });
+    const conversation = await prisma.conversation.create({
+      data: { companyId: company.id, branchId: branch.id, customerPhone: "5491100000013" },
+    });
+
+    const draft = {
+      items: [{ productId: product.id, productName: product.name, unitPriceCents: product.priceCents, quantity: 2 }],
+      customerName: "Cliente Test",
+      deliveryAddressRaw: "Calle Falsa 123",
+      deliveryLatitude: -34.6,
+      deliveryLongitude: -58.38,
+      paymentMethod: "CASH" as const,
+    };
+
+    const result = await applyActions({
+      companyId: company.id,
+      branchId: branch.id,
+      conversationId: conversation.id,
+      customerPhone: "5491100000013",
+      draft,
+      actions: [{ type: "confirm_order" }],
+      customerMessageText: "Si, perfecto",
+    });
+
+    expect(result.orderCreated).toBe(true);
   });
 });
 
@@ -648,6 +775,7 @@ describe("applyActions — avisa si el cliente paga en efectivo menos que el tot
       customerPhone: "5491100000011",
       draft,
       actions: [{ type: "confirm_order" }],
+      customerMessageText: "confirmo",
     });
 
     expect(result.orderCreated).toBe(true);
