@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import type { OrderStatus } from "@prisma/client";
 import { formatCentsAsArs } from "@/lib/money";
-import { ORDER_STATUS_LABEL } from "@/lib/orders/historial-filters";
+import { ORDER_STATUS_LABEL, ORDER_STATUS_BADGE_CLASS } from "@/lib/orders/order-status";
 import type { OrderWithItems } from "../orders-board";
 
 const STATUS_OPTIONS: OrderStatus[] = [
@@ -87,15 +87,15 @@ export function HistorialTable({
       <div className="mb-4 flex shrink-0 items-start justify-between">
         <div>
           <h1 className="text-2xl font-semibold text-gray-900">Historial de pedidos</h1>
-          <p className="mt-1 text-sm text-gray-500">Buscá, filtrá y exportá todos los pedidos de la sucursal.</p>
+          <p className="mt-1 text-sm text-gray-600">Buscá, filtrá y exportá todos los pedidos de la sucursal.</p>
         </div>
-        <Link href="/pedidos" className="text-sm font-medium text-green-700 hover:underline">
+        <Link href="/pedidos" className="text-sm font-medium text-green-700 underline">
           ← Volver al tablero
         </Link>
       </div>
 
       <div className="mb-4 flex shrink-0 flex-wrap items-end gap-3">
-        <label className="flex flex-col text-xs font-medium text-gray-500">
+        <label className="flex flex-col text-xs font-medium text-gray-600">
           Desde
           <input
             type="date"
@@ -104,7 +104,7 @@ export function HistorialTable({
             className="mt-1 rounded-md border border-gray-300 px-2 py-1.5 text-sm text-gray-900"
           />
         </label>
-        <label className="flex flex-col text-xs font-medium text-gray-500">
+        <label className="flex flex-col text-xs font-medium text-gray-600">
           Hasta
           <input
             type="date"
@@ -113,7 +113,7 @@ export function HistorialTable({
             className="mt-1 rounded-md border border-gray-300 px-2 py-1.5 text-sm text-gray-900"
           />
         </label>
-        <label className="flex flex-col text-xs font-medium text-gray-500">
+        <label className="flex flex-col text-xs font-medium text-gray-600">
           Cliente (nombre o teléfono)
           <input
             type="text"
@@ -123,7 +123,7 @@ export function HistorialTable({
             className="mt-1 w-48 rounded-md border border-gray-300 px-2 py-1.5 text-sm text-gray-900"
           />
         </label>
-        <label className="flex flex-col text-xs font-medium text-gray-500">
+        <label className="flex flex-col text-xs font-medium text-gray-600">
           Estado
           <select
             value={estado}
@@ -146,7 +146,7 @@ export function HistorialTable({
               setClienteInput("");
               setEstado("");
             }}
-            className="rounded-md px-3 py-1.5 text-sm font-medium text-gray-500 hover:bg-gray-100"
+            className="rounded-md px-3 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-100"
           >
             Limpiar filtros
           </button>
@@ -161,10 +161,10 @@ export function HistorialTable({
 
       <div className={`flex-1 overflow-auto rounded-lg border border-gray-200 bg-white ${loading ? "opacity-60" : ""}`}>
         {orders.length === 0 ? (
-          <div className="p-8 text-center text-sm text-gray-500">No hay pedidos que coincidan con estos filtros.</div>
+          <div className="p-8 text-center text-sm text-gray-600">No hay pedidos que coincidan con estos filtros.</div>
         ) : (
           <table className="w-full text-left text-sm">
-            <thead className="sticky top-0 bg-gray-50 text-xs font-medium uppercase text-gray-500">
+            <thead className="sticky top-0 bg-gray-50 text-xs font-medium uppercase text-gray-600">
               <tr>
                 <th className="px-3 py-2">Fecha</th>
                 <th className="px-3 py-2">Cliente</th>
@@ -177,7 +177,7 @@ export function HistorialTable({
             <tbody className="divide-y divide-gray-100">
               {orders.map((order) => (
                 <tr key={order.id}>
-                  <td className="whitespace-nowrap px-3 py-2 text-gray-500">
+                  <td className="whitespace-nowrap px-3 py-2 text-gray-600">
                     {new Date(order.createdAt).toLocaleString("es-AR", {
                       day: "2-digit",
                       month: "2-digit",
@@ -187,14 +187,20 @@ export function HistorialTable({
                   </td>
                   <td className="px-3 py-2">
                     <div className="font-medium text-gray-900">{order.customerName}</div>
-                    <div className="text-xs text-gray-400">{order.customerPhone}</div>
+                    <div className="text-xs text-gray-500">{order.customerPhone}</div>
                   </td>
-                  <td className="px-3 py-2 text-gray-500">
+                  <td className="px-3 py-2 text-gray-600">
                     {order.items.map((item) => `${item.quantity}x ${item.productName}`).join(", ")}
                   </td>
-                  <td className="px-3 py-2 text-gray-500">{order.paymentMethod === "CASH" ? "Efectivo" : "Transferencia"}</td>
+                  <td className="px-3 py-2 text-gray-600">{order.paymentMethod === "CASH" ? "Efectivo" : "Transferencia"}</td>
                   <td className="px-3 py-2 font-medium text-gray-900">{formatCentsAsArs(order.totalCents)}</td>
-                  <td className="px-3 py-2 text-gray-500">{ORDER_STATUS_LABEL[order.status]}</td>
+                  <td className="px-3 py-2">
+                    <span
+                      className={`rounded-full px-2 py-0.5 text-xs font-medium ${ORDER_STATUS_BADGE_CLASS[order.status]}`}
+                    >
+                      {ORDER_STATUS_LABEL[order.status]}
+                    </span>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -202,7 +208,7 @@ export function HistorialTable({
         )}
       </div>
 
-      <div className="mt-3 flex shrink-0 items-center justify-between text-sm text-gray-500">
+      <div className="mt-3 flex shrink-0 items-center justify-between text-sm text-gray-600">
         <span>{total.toLocaleString("es-AR")} pedidos en total</span>
         <div className="flex items-center gap-2">
           <button

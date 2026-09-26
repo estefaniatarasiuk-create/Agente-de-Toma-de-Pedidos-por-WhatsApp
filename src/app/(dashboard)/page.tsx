@@ -39,7 +39,7 @@ export default async function DashboardHomePage() {
       <h1 className="text-2xl font-semibold text-gray-900">
         Hola, {session?.user.companyName}
       </h1>
-      <p className="mt-1 text-sm text-gray-500">
+      <p className="mt-1 text-sm text-gray-600">
         Sucursal: {branch?.name ?? "—"}
       </p>
 
@@ -61,7 +61,7 @@ export default async function DashboardHomePage() {
                 </span>
                 <Link
                   href={step.href}
-                  className={`text-sm ${isDone ? "text-gray-500 line-through" : "text-gray-800 hover:underline"}`}
+                  className={`text-sm ${isDone ? "text-gray-600 line-through" : "text-gray-800 underline"}`}
                 >
                   {step.label}
                 </Link>

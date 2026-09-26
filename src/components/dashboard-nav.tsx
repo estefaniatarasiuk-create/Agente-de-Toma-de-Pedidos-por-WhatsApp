@@ -19,7 +19,7 @@ const NAV_ITEMS = [
 
 export function DashboardNav() {
   const pathname = usePathname();
-  const { requiresAttentionCount, notificationsEnabled, notificationsSupported, requestNotificationPermission } =
+  const { requiresAttentionCount, newOrdersCount, notificationsEnabled, notificationsSupported, requestNotificationPermission } =
     useOperationsAlerts();
 
   return (
@@ -39,6 +39,11 @@ export function DashboardNav() {
               {item.href === "/conversaciones" && requiresAttentionCount > 0 && (
                 <span className="rounded-full bg-red-600 px-2 py-0.5 text-xs font-semibold text-white">
                   {requiresAttentionCount}
+                </span>
+              )}
+              {item.href === "/pedidos" && newOrdersCount > 0 && (
+                <span className="rounded-full bg-green-600 px-2 py-0.5 text-xs font-semibold text-white">
+                  {newOrdersCount}
                 </span>
               )}
             </Link>

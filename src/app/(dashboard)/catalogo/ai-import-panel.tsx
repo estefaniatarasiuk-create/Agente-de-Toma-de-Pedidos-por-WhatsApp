@@ -85,7 +85,7 @@ export function AiImportPanel({ onImported }: { onImported: () => void }) {
   return (
     <div className="rounded-lg border border-gray-200 bg-white p-6">
       <h3 className="text-sm font-semibold text-gray-900">Cargar productos con ayuda de IA</h3>
-      <p className="mt-1 text-sm text-gray-500">
+      <p className="mt-1 text-sm text-gray-600">
         Pegá el texto de tu menú o subí una foto. La IA propone el listado estructurado y vos lo revisás
         antes de confirmarlo — nada se guarda sin tu aprobación.
       </p>

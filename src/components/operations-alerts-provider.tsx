@@ -2,9 +2,11 @@
 
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { playAlertBeep } from "@/lib/notifications/beep";
+import { ToastStack, type ToastItem } from "@/components/toast-stack";
 
 type AlertsContextValue = {
   requiresAttentionCount: number;
+  newOrdersCount: number;
   notificationsEnabled: boolean;
   notificationsSupported: boolean;
   requestNotificationPermission: () => void;
@@ -12,6 +14,7 @@ type AlertsContextValue = {
 
 const AlertsContext = createContext<AlertsContextValue>({
   requiresAttentionCount: 0,
+  newOrdersCount: 0,
   notificationsEnabled: false,
   notificationsSupported: false,
   requestNotificationPermission: () => {},
@@ -33,10 +36,16 @@ type NotificacionesResponse = { requiresAttentionIds: string[]; newOrderIds: str
 // de cosas que ya estaban ahí antes de abrirlo.
 export function OperationsAlertsProvider({ children }: { children: React.ReactNode }) {
   const [requiresAttentionCount, setRequiresAttentionCount] = useState(0);
+  const [newOrdersCount, setNewOrdersCount] = useState(0);
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
+  const [toasts, setToasts] = useState<ToastItem[]>([]);
   const notificationsSupported = typeof window !== "undefined" && "Notification" in window;
   const seenAttentionIds = useRef<Set<string> | null>(null);
   const seenOrderIds = useRef<Set<string> | null>(null);
+
+  const dismissToast = useCallback((id: string) => {
+    setToasts((current) => current.filter((toast) => toast.id !== id));
+  }, []);
 
   useEffect(() => {
     if (notificationsSupported && Notification.permission === "granted") {
@@ -56,6 +65,10 @@ export function OperationsAlertsProvider({ children }: { children: React.ReactNo
       if (notificationsSupported && Notification.permission === "granted") {
         new Notification(title, { body });
       }
+      // Flotante en pantalla además del sonido y la notificación del
+      // navegador (pedido explícito del usuario): se ve aunque el navegador
+      // no tenga permiso de notificaciones concedido, o esté en otra pestaña.
+      setToasts((current) => [...current, { id: `${Date.now()}-${Math.random()}`, title, body }]);
     },
     [notificationsSupported],
   );
@@ -91,6 +104,7 @@ export function OperationsAlertsProvider({ children }: { children: React.ReactNo
         seenAttentionIds.current = new Set(data.requiresAttentionIds);
         seenOrderIds.current = new Set(data.newOrderIds);
         setRequiresAttentionCount(data.requiresAttentionIds.length);
+        setNewOrdersCount(data.newOrderIds.length);
       } catch {
         // Sondeo puntual fallido (red, deploy en curso): se reintenta solo.
       }
@@ -106,9 +120,10 @@ export function OperationsAlertsProvider({ children }: { children: React.ReactNo
 
   return (
     <AlertsContext.Provider
-      value={{ requiresAttentionCount, notificationsEnabled, notificationsSupported, requestNotificationPermission }}
+      value={{ requiresAttentionCount, newOrdersCount, notificationsEnabled, notificationsSupported, requestNotificationPermission }}
     >
       {children}
+      <ToastStack toasts={toasts} onDismiss={dismissToast} />
     </AlertsContext.Provider>
   );
 }

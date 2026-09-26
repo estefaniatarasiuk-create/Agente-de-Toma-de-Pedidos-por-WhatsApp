@@ -57,7 +57,7 @@ export function DraftProductTable({
                 />
               </td>
               <td className="px-3 py-1.5 text-right">
-                <button onClick={() => removeRow(index)} className="text-red-600 hover:underline">
+                <button onClick={() => removeRow(index)} className="text-red-600 underline">
                   Quitar
                 </button>
               </td>

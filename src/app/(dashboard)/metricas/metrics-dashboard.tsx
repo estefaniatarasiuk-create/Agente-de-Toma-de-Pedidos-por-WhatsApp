@@ -57,7 +57,7 @@ export function MetricsDashboard({ initialData }: { initialData: MetricsData | n
     <div className="flex h-screen flex-col overflow-y-auto p-8">
       <div className="mb-6 shrink-0">
         <h1 className="text-2xl font-semibold text-gray-900">Métricas</h1>
-        <p className="mt-1 text-sm text-gray-500">Ventas de la sucursal: pedidos, facturación y medios de pago.</p>
+        <p className="mt-1 text-sm text-gray-600">Ventas de la sucursal: pedidos, facturación y medios de pago.</p>
       </div>
 
       <div className="mb-2 flex flex-wrap items-center gap-2">
@@ -80,7 +80,7 @@ export function MetricsDashboard({ initialData }: { initialData: MetricsData | n
               onChange={(event) => setCustomFrom(event.target.value)}
               className="rounded-md border border-gray-300 px-2 py-1"
             />
-            <span className="text-gray-400">a</span>
+            <span className="text-gray-500">a</span>
             <input
               type="date"
               value={customTo}
@@ -98,10 +98,10 @@ export function MetricsDashboard({ initialData }: { initialData: MetricsData | n
         )}
       </div>
 
-      {data && <p className="mb-6 text-xs text-gray-400">Mostrando: {formatRangeLabel(data.range)}</p>}
+      {data && <p className="mb-6 text-xs text-gray-500">Mostrando: {formatRangeLabel(data.range)}</p>}
 
       {!data ? (
-        <div className="rounded-lg border border-dashed border-gray-300 bg-white p-8 text-center text-sm text-gray-500">
+        <div className="rounded-lg border border-dashed border-gray-300 bg-white p-8 text-center text-sm text-gray-600">
           No se pudieron cargar las métricas.
         </div>
       ) : (
@@ -116,7 +116,7 @@ export function MetricsDashboard({ initialData }: { initialData: MetricsData | n
           <div className="mt-6 rounded-lg border border-gray-200 bg-white p-5">
             <h2 className="text-sm font-semibold text-gray-700">Facturación por día</h2>
             {data.daily.length === 0 ? (
-              <p className="mt-4 text-sm text-gray-500">No hay pedidos en este rango.</p>
+              <p className="mt-4 text-sm text-gray-600">No hay pedidos en este rango.</p>
             ) : (
               <DailyRevenueChart daily={data.daily} />
             )}
@@ -130,7 +130,7 @@ export function MetricsDashboard({ initialData }: { initialData: MetricsData | n
 function StatTile({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-lg border border-gray-200 bg-white p-4">
-      <div className="text-sm text-gray-500">{label}</div>
+      <div className="text-sm text-gray-600">{label}</div>
       <div className="mt-1 text-2xl font-semibold text-gray-900">{value}</div>
     </div>
   );
@@ -141,9 +141,9 @@ function PaymentSplitTile({ cash, transfer }: { cash: MetricsData["cash"]; trans
   const cashPct = totalRevenueCents > 0 ? Math.round((cash.revenueCents / totalRevenueCents) * 100) : 0;
   return (
     <div className="rounded-lg border border-gray-200 bg-white p-4">
-      <div className="text-sm text-gray-500">Efectivo vs. transferencia</div>
+      <div className="text-sm text-gray-600">Efectivo vs. transferencia</div>
       <div className="mt-1 text-2xl font-semibold text-gray-900">{cashPct}% efectivo</div>
-      <div className="mt-1 text-xs text-gray-400">
+      <div className="mt-1 text-xs text-gray-500">
         {cash.orders} efectivo ({formatCentsAsArs(cash.revenueCents)}) · {transfer.orders} transferencia (
         {formatCentsAsArs(transfer.revenueCents)})
       </div>
@@ -294,9 +294,9 @@ function DailyRevenueChart({ daily }: { daily: MetricsData["daily"] }) {
         {hoverIndex !== null && (
           <div className="inline-flex items-center gap-2 rounded-md border border-gray-200 bg-gray-50 px-3 py-1.5 text-xs text-gray-700">
             <span className="font-medium">{formatFullDayLabel(daily[hoverIndex].date)}</span>
-            <span className="text-gray-400">·</span>
+            <span className="text-gray-500">·</span>
             <span>{formatCentsAsArs(daily[hoverIndex].revenueCents)}</span>
-            <span className="text-gray-400">·</span>
+            <span className="text-gray-500">·</span>
             <span>
               {daily[hoverIndex].orders} {daily[hoverIndex].orders === 1 ? "pedido" : "pedidos"}
             </span>

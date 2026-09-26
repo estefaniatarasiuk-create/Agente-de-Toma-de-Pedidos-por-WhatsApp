@@ -16,7 +16,7 @@ export function ProductTable({
 }) {
   if (products.length === 0) {
     return (
-      <div className="rounded-lg border border-dashed border-gray-300 bg-white p-8 text-center text-sm text-gray-500">
+      <div className="rounded-lg border border-dashed border-gray-300 bg-white p-8 text-center text-sm text-gray-600">
         Todavía no cargaste productos.
       </div>
     );
@@ -36,10 +36,10 @@ export function ProductTable({
         </thead>
         <tbody className="divide-y divide-gray-100">
           {products.map((product) => (
-            <tr key={product.id} className={product.isActive ? "" : "bg-gray-50 text-gray-400"}>
+            <tr key={product.id} className={product.isActive ? "" : "bg-gray-50 text-gray-500"}>
               <td className="px-4 py-2">
                 <div className="font-medium">{product.name}</div>
-                {product.description && <div className="text-xs text-gray-500">{product.description}</div>}
+                {product.description && <div className="text-xs text-gray-600">{product.description}</div>}
               </td>
               <td className="px-4 py-2">{product.category || "—"}</td>
               <td className="px-4 py-2 text-right">{formatCentsAsArs(product.priceCents)}</td>
@@ -51,13 +51,13 @@ export function ProductTable({
                 )}
               </td>
               <td className="px-4 py-2 text-right whitespace-nowrap">
-                <button onClick={() => onEdit(product)} className="text-green-700 hover:underline mr-3">
+                <button onClick={() => onEdit(product)} className="text-green-700 underline mr-3">
                   Editar
                 </button>
-                <button onClick={() => onTogglePause(product)} className="text-gray-600 hover:underline mr-3">
+                <button onClick={() => onTogglePause(product)} className="text-gray-600 underline mr-3">
                   {product.isActive ? "Pausar" : "Reactivar"}
                 </button>
-                <button onClick={() => onDelete(product)} className="text-red-600 hover:underline">
+                <button onClick={() => onDelete(product)} className="text-red-600 underline">
                   Eliminar
                 </button>
               </td>

@@ -49,7 +49,7 @@ export function PaymentMethodForm({ initialConfig }: { initialConfig: PaymentMet
   return (
     <div className="p-8 max-w-2xl">
       <h1 className="text-2xl font-semibold text-gray-900">Medios de pago</h1>
-      <p className="mt-1 text-sm text-gray-500">
+      <p className="mt-1 text-sm text-gray-600">
         Definí qué medios de pago acepta tu sucursal. La IA le va a informar al cliente exactamente estos
         datos, nunca inventa alias, CBU ni CUIT.
       </p>

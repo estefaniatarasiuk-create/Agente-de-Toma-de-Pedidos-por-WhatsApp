@@ -137,7 +137,7 @@ export function WhatsAppConnection({ initialLine }: { initialLine: SafeWhatsAppL
       />
 
       <h1 className="text-2xl font-semibold text-gray-900">Línea de WhatsApp</h1>
-      <p className="mt-1 text-sm text-gray-500">
+      <p className="mt-1 text-sm text-gray-600">
         Vinculá el número de WhatsApp de tu sucursal para que la IA lo use en la toma de pedidos.
       </p>
 
@@ -157,7 +157,7 @@ export function WhatsAppConnection({ initialLine }: { initialLine: SafeWhatsAppL
             )}
             {line.verifiedName && <p className="text-sm text-gray-600">Nombre verificado: {line.verifiedName}</p>}
             {line.connectedAt && (
-              <p className="text-xs text-gray-400">
+              <p className="text-xs text-gray-500">
                 Conectada el {new Date(line.connectedAt).toLocaleString("es-AR")}
               </p>
             )}
@@ -166,7 +166,7 @@ export function WhatsAppConnection({ initialLine }: { initialLine: SafeWhatsAppL
             )}
           </div>
         ) : (
-          <p className="text-sm text-gray-500">Todavía no vinculaste ninguna línea.</p>
+          <p className="text-sm text-gray-600">Todavía no vinculaste ninguna línea.</p>
         )}
 
         {error && <p className="text-sm text-red-600">{error}</p>}

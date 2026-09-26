@@ -42,13 +42,13 @@ export function TestChatWidget() {
   return (
     <div className="rounded-lg border border-gray-200 bg-white p-6">
       <h3 className="text-sm font-semibold text-gray-900">Probar conversación</h3>
-      <p className="mt-1 text-sm text-gray-500">
+      <p className="mt-1 text-sm text-gray-600">
         Simulá un chat con tu configuración vigente. No se registra ningún pedido real.
       </p>
 
       <div className="mt-4 h-80 overflow-y-auto rounded-md border border-gray-100 bg-gray-50 p-3 space-y-2">
         {messages.length === 0 && (
-          <p className="text-sm text-gray-400">Escribí un mensaje como si fueras un cliente por WhatsApp.</p>
+          <p className="text-sm text-gray-500">Escribí un mensaje como si fueras un cliente por WhatsApp.</p>
         )}
         {messages.map((message, index) => (
           <div key={index} className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}>

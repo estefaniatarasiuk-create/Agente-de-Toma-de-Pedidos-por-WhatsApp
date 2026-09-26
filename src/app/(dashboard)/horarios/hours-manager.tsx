@@ -121,14 +121,14 @@ export function HoursManager({ initialSlots }: { initialSlots: BusinessHourSlot[
     <div className="p-8 max-w-3xl space-y-6">
       <div>
         <h1 className="text-2xl font-semibold text-gray-900">Horarios de atención</h1>
-        <p className="mt-1 text-sm text-gray-500">
+        <p className="mt-1 text-sm text-gray-600">
           Fuera de estos horarios, el sistema responde automáticamente sin registrar pedidos.
         </p>
       </div>
 
       <div className="rounded-lg border border-gray-200 bg-white p-6">
         <h2 className="text-sm font-semibold text-gray-900">Cargar en lenguaje natural</h2>
-        <p className="mt-1 text-sm text-gray-500">
+        <p className="mt-1 text-sm text-gray-600">
           Ej: &quot;de martes a domingo, de 11 a 14:30 y de 19 a 23&quot;
         </p>
         <textarea
@@ -144,7 +144,7 @@ export function HoursManager({ initialSlots }: { initialSlots: BusinessHourSlot[
         >
           {isInterpreting ? "Interpretando..." : "Interpretar con IA"}
         </button>
-        <p className="mt-2 text-xs text-gray-400">
+        <p className="mt-2 text-xs text-gray-500">
           Esto reemplaza la grilla de abajo por lo que interprete la IA — revisala y confirmá antes de
           guardar.
         </p>
@@ -160,12 +160,12 @@ export function HoursManager({ initialSlots }: { initialSlots: BusinessHourSlot[
                 <span className="text-sm font-medium text-gray-800">{dayName}</span>
                 <button
                   onClick={() => addSlot(dayOfWeek)}
-                  className="text-xs font-medium text-green-700 hover:underline"
+                  className="text-xs font-medium text-green-700 underline"
                 >
                   + Agregar franja
                 </button>
               </div>
-              {daySlots.length === 0 && <p className="mt-1 text-xs text-gray-400">Cerrado</p>}
+              {daySlots.length === 0 && <p className="mt-1 text-xs text-gray-500">Cerrado</p>}
               <div className="mt-2 space-y-2">
                 {daySlots.map((slot) => (
                   <div key={slot.key} className="flex items-center gap-2">
@@ -185,7 +185,7 @@ export function HoursManager({ initialSlots }: { initialSlots: BusinessHourSlot[
                       }}
                       className="rounded border border-gray-300 px-2 py-1 text-sm"
                     />
-                    <span className="text-sm text-gray-400">a</span>
+                    <span className="text-sm text-gray-500">a</span>
                     <input
                       type="time"
                       value={minutesToTimeLabel(slot.endMinute)}
@@ -195,7 +195,7 @@ export function HoursManager({ initialSlots }: { initialSlots: BusinessHourSlot[
                       }}
                       className="rounded border border-gray-300 px-2 py-1 text-sm"
                     />
-                    <button onClick={() => removeSlot(slot.key)} className="text-xs text-red-600 hover:underline">
+                    <button onClick={() => removeSlot(slot.key)} className="text-xs text-red-600 underline">
                       Quitar
                     </button>
                   </div>

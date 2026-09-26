@@ -1,5 +1,7 @@
 import type { Prisma, OrderStatus } from "@prisma/client";
 
+export { ORDER_STATUS_LABEL, ORDER_STATUS_BADGE_CLASS } from "./order-status";
+
 const VALID_STATUSES = new Set<OrderStatus>([
   "WAITING_RECEIPT",
   "PENDING",
@@ -8,15 +10,6 @@ const VALID_STATUSES = new Set<OrderStatus>([
   "DELIVERED",
   "CANCELLED",
 ]);
-
-export const ORDER_STATUS_LABEL: Record<OrderStatus, string> = {
-  WAITING_RECEIPT: "Esperando comprobante",
-  PENDING: "Pendiente",
-  PREPARING: "En preparación",
-  ON_THE_WAY: "En camino",
-  DELIVERED: "Entregado",
-  CANCELLED: "Cancelado",
-};
 
 export type HistorialFilterParams = {
   from: string | null; // "YYYY-MM-DD"

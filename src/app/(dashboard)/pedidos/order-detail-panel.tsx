@@ -3,19 +3,11 @@
 import { useEffect, useState } from "react";
 import type { Order, OrderItem, OrderStatus, OrderStatusEvent } from "@prisma/client";
 import { formatCentsAsArs } from "@/lib/money";
+import { ORDER_STATUS_LABEL, ORDER_STATUS_BADGE_CLASS } from "@/lib/orders/order-status";
 
 type OrderDetail = Order & {
   items: OrderItem[];
   statusEvents: (OrderStatusEvent & { changedByUser: { name: string } | null })[];
-};
-
-const STATUS_LABEL: Record<OrderStatus, string> = {
-  WAITING_RECEIPT: "Esperando comprobante",
-  PENDING: "Pendiente",
-  PREPARING: "En preparación",
-  ON_THE_WAY: "En camino",
-  DELIVERED: "Entregado",
-  CANCELLED: "Cancelado",
 };
 
 const ADVANCE_LABEL: Partial<Record<OrderStatus, string>> = {
@@ -77,23 +69,23 @@ export function OrderDetailPanel({
     <div className="fixed inset-0 z-20 flex justify-end bg-black/30" onClick={onClose}>
       <div className="h-full w-full max-w-md overflow-y-auto bg-white shadow-xl" onClick={(event) => event.stopPropagation()}>
         {!order ? (
-          <div className="p-6 text-sm text-gray-500">Cargando...</div>
+          <div className="p-6 text-sm text-gray-600">Cargando...</div>
         ) : (
           <div className="flex h-full flex-col">
             <div className="flex items-start justify-between border-b border-gray-200 p-4">
               <div>
                 <h2 className="text-lg font-semibold text-gray-900">{order.customerName}</h2>
-                <p className="text-sm text-gray-500">{order.customerPhone}</p>
+                <p className="text-sm text-gray-600">{order.customerPhone}</p>
               </div>
-              <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
+              <button onClick={onClose} className="text-gray-500 hover:text-gray-600">
                 ✕
               </button>
             </div>
 
             <div className="flex-1 space-y-5 p-4">
               <div>
-                <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-700">
-                  {STATUS_LABEL[order.status]}
+                <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${ORDER_STATUS_BADGE_CLASS[order.status]}`}>
+                  {ORDER_STATUS_LABEL[order.status]}
                 </span>
                 {order.isDelayed && (
                   <span className="ml-2 rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700">
@@ -103,7 +95,7 @@ export function OrderDetailPanel({
               </div>
 
               <div>
-                <h3 className="text-xs font-semibold uppercase text-gray-500">Productos</h3>
+                <h3 className="text-xs font-semibold uppercase text-gray-600">Productos</h3>
                 <ul className="mt-1 space-y-1 text-sm">
                   {order.items.map((item) => (
                     <li key={item.id} className="flex justify-between">
@@ -121,16 +113,16 @@ export function OrderDetailPanel({
               </div>
 
               <div>
-                <h3 className="text-xs font-semibold uppercase text-gray-500">Entrega</h3>
+                <h3 className="text-xs font-semibold uppercase text-gray-600">Entrega</h3>
                 <p className="mt-1 text-sm text-gray-800">{order.deliveryAddressRaw}</p>
                 {order.deliveryAddressNormalized && (
-                  <p className="text-xs text-gray-500">{order.deliveryAddressNormalized}</p>
+                  <p className="text-xs text-gray-600">{order.deliveryAddressNormalized}</p>
                 )}
-                {order.deliveryNotes && <p className="text-xs text-gray-500">Notas: {order.deliveryNotes}</p>}
+                {order.deliveryNotes && <p className="text-xs text-gray-600">Notas: {order.deliveryNotes}</p>}
               </div>
 
               <div>
-                <h3 className="text-xs font-semibold uppercase text-gray-500">Pago</h3>
+                <h3 className="text-xs font-semibold uppercase text-gray-600">Pago</h3>
                 <p className="mt-1 text-sm text-gray-800">
                   {order.paymentMethod === "CASH" ? "Efectivo" : "Transferencia"}
                   {order.paymentMethod === "CASH" && order.changeAmountCents !== null && order.changeAmountCents > 0
@@ -139,7 +131,7 @@ export function OrderDetailPanel({
                 </p>
                 {order.receiptUrl && (
                   <div className="mt-2">
-                    <p className="text-xs text-gray-500">Comprobante recibido:</p>
+                    <p className="text-xs text-gray-600">Comprobante recibido:</p>
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
                       src={`/api/uploads/${order.receiptUrl}`}
@@ -154,13 +146,13 @@ export function OrderDetailPanel({
               </div>
 
               <div>
-                <h3 className="text-xs font-semibold uppercase text-gray-500">Historial</h3>
-                <ul className="mt-1 space-y-1 text-xs text-gray-500">
+                <h3 className="text-xs font-semibold uppercase text-gray-600">Historial</h3>
+                <ul className="mt-1 space-y-1 text-xs text-gray-600">
                   {order.statusEvents.map((event) => (
                     <li key={event.id}>
                       {new Date(event.createdAt).toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" })}
                       {" — "}
-                      {STATUS_LABEL[event.toStatus]}
+                      {ORDER_STATUS_LABEL[event.toStatus]}
                       {event.changedByUser ? ` (${event.changedByUser.name})` : event.changedByAI ? " (IA)" : ""}
                       {event.reason ? `: ${event.reason}` : ""}
                     </li>
@@ -182,7 +174,7 @@ export function OrderDetailPanel({
                 </button>
               )}
               {order.status === "WAITING_RECEIPT" && !order.receiptUrl && (
-                <p className="text-center text-xs text-gray-500">Esperando que el cliente mande el comprobante.</p>
+                <p className="text-center text-xs text-gray-600">Esperando que el cliente mande el comprobante.</p>
               )}
               {ADVANCE_LABEL[order.status] && (
                 <button

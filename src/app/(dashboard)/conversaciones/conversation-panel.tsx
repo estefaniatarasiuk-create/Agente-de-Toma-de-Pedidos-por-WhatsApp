@@ -10,7 +10,7 @@ const STATUS_BADGE: Record<ConversationStatus, { label: string; className: strin
   ACTIVE: { label: "IA activa", className: "bg-green-100 text-green-700" },
   REQUIRES_ATTENTION: { label: "Necesita atención", className: "bg-red-100 text-red-700" },
   AI_PAUSED: { label: "IA pausada", className: "bg-yellow-100 text-yellow-700" },
-  CLOSED: { label: "Cerrada", className: "bg-gray-100 text-gray-500" },
+  CLOSED: { label: "Cerrada", className: "bg-gray-100 text-gray-600" },
 };
 
 const CHAT_POLL_INTERVAL_MS = 4000;
@@ -85,7 +85,7 @@ export function ConversationPanel({ conversationId, onChanged }: { conversationI
   }
 
   if (!conversation) {
-    return <div className="p-6 text-sm text-gray-500">Cargando...</div>;
+    return <div className="p-6 text-sm text-gray-600">Cargando...</div>;
   }
 
   const badge = STATUS_BADGE[conversation.status];
@@ -100,8 +100,8 @@ export function ConversationPanel({ conversationId, onChanged }: { conversationI
           <h2 className="text-base font-semibold text-gray-900">
             {conversation.customerName || conversation.customerPhone}
           </h2>
-          <p className="text-xs text-gray-500">{conversation.customerPhone}</p>
-          {activeOrder && <p className="text-xs text-gray-500">Pedido activo: {activeOrder.id.slice(-6)}</p>}
+          <p className="text-xs text-gray-600">{conversation.customerPhone}</p>
+          {activeOrder && <p className="text-xs text-gray-600">Pedido activo: {activeOrder.id.slice(-6)}</p>}
         </div>
         <div className="flex items-center gap-2">
           <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${badge.className}`}>{badge.label}</span>
@@ -143,7 +143,7 @@ export function ConversationPanel({ conversationId, onChanged }: { conversationI
                 }`}
               >
                 <p className="whitespace-pre-wrap">{messageLabel(message)}</p>
-                <p className={`mt-1 text-[10px] ${isOutbound ? "text-green-100" : "text-gray-400"}`}>
+                <p className={`mt-1 text-[10px] ${isOutbound ? "text-green-100" : "text-gray-500"}`}>
                   {new Date(message.createdAt).toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" })}
                   {message.sentByUser ? ` · ${message.sentByUser.name}` : isOutbound ? " · IA" : ""}
                 </p>

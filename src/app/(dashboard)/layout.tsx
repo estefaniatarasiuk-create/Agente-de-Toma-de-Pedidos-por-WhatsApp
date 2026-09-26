@@ -14,7 +14,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
             <p className="text-sm font-semibold text-gray-900">
               {session?.user?.companyName}
             </p>
-            <p className="text-xs text-gray-500">{session?.user?.email}</p>
+            <p className="text-xs text-gray-600">{session?.user?.email}</p>
           </div>
           <DashboardNav />
           <div className="border-t border-gray-200 p-3">

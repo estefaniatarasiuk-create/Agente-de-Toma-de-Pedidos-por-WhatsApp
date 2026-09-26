@@ -110,9 +110,9 @@ export default function RegistroPage() {
         </button>
       </form>
 
-      <p className="mt-6 text-center text-sm text-gray-500">
+      <p className="mt-6 text-center text-sm text-gray-600">
         ¿Ya tenés cuenta?{" "}
-        <Link href="/login" className="font-medium text-green-700 hover:underline">
+        <Link href="/login" className="font-medium text-green-700 underline">
           Iniciá sesión
         </Link>
       </p>

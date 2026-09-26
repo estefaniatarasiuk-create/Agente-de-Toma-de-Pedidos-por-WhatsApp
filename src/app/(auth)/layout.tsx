@@ -4,7 +4,7 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
       <div className="w-full max-w-sm">
         <div className="mb-8 text-center">
           <h1 className="text-xl font-semibold text-gray-900">Pedidos WhatsApp</h1>
-          <p className="mt-1 text-sm text-gray-500">
+          <p className="mt-1 text-sm text-gray-600">
             Toma de pedidos automatizada por IA para delivery de comida
           </p>
         </div>

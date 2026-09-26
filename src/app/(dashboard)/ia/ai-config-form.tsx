@@ -79,7 +79,7 @@ export function AiConfigForm({ initialConfig }: { initialConfig: AIConfig | null
 
       <div>
         <label className="block text-sm font-medium text-gray-700">Información adicional para la IA</label>
-        <p className="text-xs text-gray-500">
+        <p className="text-xs text-gray-600">
           Ej: costo de envío propio, promociones, aclaraciones como &quot;no entregamos en edificios sin
           portero&quot;. Nunca puede contradecir horarios, zona ni precios: eso siempre lo define la
           configuración estructurada.

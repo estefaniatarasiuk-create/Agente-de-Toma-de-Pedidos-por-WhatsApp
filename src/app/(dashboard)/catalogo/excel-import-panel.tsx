@@ -66,7 +66,7 @@ export function ExcelImportPanel({ onImported }: { onImported: () => void }) {
   return (
     <div className="rounded-lg border border-gray-200 bg-white p-6">
       <h3 className="text-sm font-semibold text-gray-900">Importar desde Excel</h3>
-      <p className="mt-1 text-sm text-gray-500">
+      <p className="mt-1 text-sm text-gray-600">
         El archivo tiene que tener columnas <strong>Nombre</strong> y <strong>Precio</strong> (Descripción y
         Categoría son opcionales).
       </p>
@@ -83,7 +83,7 @@ export function ExcelImportPanel({ onImported }: { onImported: () => void }) {
             }}
             className="text-sm"
           />
-          {isAnalyzing && <p className="text-sm text-gray-500">Analizando archivo...</p>}
+          {isAnalyzing && <p className="text-sm text-gray-600">Analizando archivo...</p>}
           {error && <p className="text-sm text-red-600">{error}</p>}
         </div>
       )}

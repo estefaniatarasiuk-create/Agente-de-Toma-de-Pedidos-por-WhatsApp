@@ -14,7 +14,14 @@ export function ZoneManager({
   initialBranch: Branch;
   initialZone: DeliveryZone | null;
 }) {
-  const { isLoaded } = useJsApiLoader({
+  // "loadError" no se chequeaba antes: si el script de Google Maps fallaba
+  // al cargar (API key inválida, "Maps JavaScript API" no habilitada en el
+  // proyecto de Google Cloud, o restricción de referrer que bloquea el
+  // dominio actual), "isLoaded" se quedaba en false para siempre y la
+  // pantalla mostraba "Cargando mapa..." de forma indefinida — idéntico a
+  // como se ve mientras realmente está cargando, sin ninguna pista de qué
+  // falló.
+  const { isLoaded, loadError } = useJsApiLoader({
     googleMapsApiKey: process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ?? "",
   });
 
@@ -112,7 +119,7 @@ export function ZoneManager({
     <div className="p-8 max-w-3xl space-y-6">
       <div>
         <h1 className="text-2xl font-semibold text-gray-900">Zona de entrega</h1>
-        <p className="mt-1 text-sm text-gray-500">
+        <p className="mt-1 text-sm text-gray-600">
           La IA no toma pedidos con domicilios fuera de este radio.
         </p>
       </div>
@@ -171,7 +178,18 @@ export function ZoneManager({
           />
         </div>
 
-        {isLoaded ? (
+        {loadError ? (
+          <div className="flex h-[420px] flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-red-300 bg-red-50 p-4 text-center text-sm text-red-700">
+            <p className="font-medium">No se pudo cargar el mapa de Google.</p>
+            <p className="text-xs text-red-600">
+              Revisá en Google Cloud Console que la API key de
+              NEXT_PUBLIC_GOOGLE_MAPS_API_KEY tenga habilitada &quot;Maps JavaScript
+              API&quot; (no alcanza con &quot;Geocoding API&quot;) y que sus
+              restricciones de referrer/HTTP permitan este dominio.
+            </p>
+            <p className="text-xs text-red-500">Detalle técnico: {loadError.message}</p>
+          </div>
+        ) : isLoaded ? (
           <GoogleMap mapContainerStyle={MAP_CONTAINER_STYLE} center={center} zoom={13}>
             <Marker position={center} draggable onDragEnd={handleMarkerDragEnd} />
             <Circle
@@ -181,13 +199,13 @@ export function ZoneManager({
             />
           </GoogleMap>
         ) : (
-          <div className="flex h-[420px] items-center justify-center rounded-lg border border-dashed border-gray-300 text-sm text-gray-400">
+          <div className="flex h-[420px] items-center justify-center rounded-lg border border-dashed border-gray-300 text-sm text-gray-500">
             {process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY
               ? "Cargando mapa..."
               : "Falta configurar NEXT_PUBLIC_GOOGLE_MAPS_API_KEY para ver el mapa."}
           </div>
         )}
-        <p className="text-xs text-gray-400">
+        <p className="text-xs text-gray-500">
           Podés arrastrar el marcador para ajustar el centro exacto del local.
         </p>
 

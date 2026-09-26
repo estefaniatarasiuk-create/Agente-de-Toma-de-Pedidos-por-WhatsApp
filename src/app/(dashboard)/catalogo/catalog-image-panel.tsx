@@ -56,7 +56,7 @@ export function CatalogImagePanel({
   return (
     <div className="rounded-lg border border-gray-200 bg-white p-6">
       <h3 className="text-sm font-semibold text-gray-900">Imagen del catálogo</h3>
-      <p className="mt-1 text-sm text-gray-500">
+      <p className="mt-1 text-sm text-gray-600">
         La IA la comparte por WhatsApp cuando el cliente pide ver el catálogo completo o la lista de
         precios.
       </p>
@@ -71,7 +71,7 @@ export function CatalogImagePanel({
         )}
         <div className="flex-1 space-y-2">
           {catalogImage && (
-            <p className="text-xs text-gray-500">
+            <p className="text-xs text-gray-600">
               {catalogImage.source === "GENERATED"
                 ? "Generada automáticamente a partir de tu catálogo."
                 : "Imagen propia subida por vos."}

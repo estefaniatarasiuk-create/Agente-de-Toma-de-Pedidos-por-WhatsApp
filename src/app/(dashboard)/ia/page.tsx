@@ -12,7 +12,7 @@ export default async function ConfiguracionIaPage() {
   return (
     <div className="p-8 max-w-5xl">
       <h1 className="text-2xl font-semibold text-gray-900">Configuración de la IA</h1>
-      <p className="mt-1 text-sm text-gray-500">
+      <p className="mt-1 text-sm text-gray-600">
         La IA nunca inventa precios ni horarios: solo conversa y estructura, siempre valida contra tu
         catálogo, zona y horarios configurados.
       </p>

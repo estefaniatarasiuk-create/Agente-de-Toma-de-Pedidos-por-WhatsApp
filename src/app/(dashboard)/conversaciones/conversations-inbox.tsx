@@ -10,7 +10,7 @@ const STATUS_BADGE: Record<ConversationStatus, { label: string; className: strin
   ACTIVE: { label: "IA activa", className: "bg-green-100 text-green-700" },
   REQUIRES_ATTENTION: { label: "Necesita atención", className: "bg-red-100 text-red-700" },
   AI_PAUSED: { label: "IA pausada", className: "bg-yellow-100 text-yellow-700" },
-  CLOSED: { label: "Cerrada", className: "bg-gray-100 text-gray-500" },
+  CLOSED: { label: "Cerrada", className: "bg-gray-100 text-gray-600" },
 };
 
 const POLL_INTERVAL_MS = 8000;
@@ -47,7 +47,7 @@ export function ConversationsInbox({ initialConversations }: { initialConversati
         </div>
         <div className="flex-1 overflow-y-auto">
           {sorted.length === 0 ? (
-            <p className="p-4 text-sm text-gray-500">Todavía no hay conversaciones.</p>
+            <p className="p-4 text-sm text-gray-600">Todavía no hay conversaciones.</p>
           ) : (
             sorted.map((conversation) => {
               const badge = STATUS_BADGE[conversation.status];
@@ -69,7 +69,7 @@ export function ConversationsInbox({ initialConversations }: { initialConversati
                     </span>
                   </div>
                   {lastMessage && (
-                    <p className="mt-1 truncate text-xs text-gray-500">
+                    <p className="mt-1 truncate text-xs text-gray-600">
                       {lastMessage.textContent || lastMessage.transcription || `[${lastMessage.messageType.toLowerCase()}]`}
                     </p>
                   )}
@@ -84,7 +84,7 @@ export function ConversationsInbox({ initialConversations }: { initialConversati
         {selectedId ? (
           <ConversationPanel key={selectedId} conversationId={selectedId} onChanged={refresh} />
         ) : (
-          <div className="flex h-full items-center justify-center text-sm text-gray-400">
+          <div className="flex h-full items-center justify-center text-sm text-gray-500">
             Elegí una conversación de la lista.
           </div>
         )}

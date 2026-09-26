@@ -311,12 +311,17 @@ la Fase 4): con el panel abierto, hacé clic en "Activar notificaciones" en
 la barra lateral (el navegador va a pedir el permiso). A partir de ahí:
 
 1. El número junto a "Conversaciones" en el menú muestra cuántas necesitan
-   atención humana en este momento, en vivo.
+   atención humana en este momento, en vivo; el número junto a "Pedidos"
+   muestra cuántos están pendientes de gestionar (esperando comprobante o
+   por preparar).
 2. Cuando una conversación pasa a necesitar atención, o llega un pedido
-   nuevo, suena un beep corto y aparece una notificación del navegador —
-   sin bloquear nada de lo que estés haciendo en el panel. Solo avisa de
-   lo que aparece **después** de abrir el panel, no de lo que ya estaba
-   ahí (para no repetir alertas viejas cada vez que recargás la página).
+   nuevo, suena un beep corto, aparece una notificación del navegador, y
+   además una tarjeta flotante en la esquina inferior derecha de la
+   pantalla — sin bloquear nada de lo que estés haciendo en el panel. La
+   tarjeta se desvanece sola a los 10 segundos si no la cerrás antes.
+   Solo avisa de lo que aparece **después** de abrir el panel, no de lo
+   que ya estaba ahí (para no repetir alertas viejas cada vez que
+   recargás la página).
 3. El tablero de pedidos, la lista de conversaciones y el chat abierto se
    actualizan solos cada pocos segundos (sondeo periódico) — no hace falta
    recargar la página para ver un mensaje o pedido nuevo.

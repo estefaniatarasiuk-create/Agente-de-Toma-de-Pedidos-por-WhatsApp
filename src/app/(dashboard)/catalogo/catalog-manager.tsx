@@ -45,7 +45,7 @@ export function CatalogManager({
     <div className="p-8 space-y-8">
       <div>
         <h1 className="text-2xl font-semibold text-gray-900">Catálogo de productos</h1>
-        <p className="mt-1 text-sm text-gray-500">
+        <p className="mt-1 text-sm text-gray-600">
           La IA solo toma pedidos de productos activos con los precios que ves acá.
         </p>
       </div>
@@ -55,7 +55,7 @@ export function CatalogManager({
       <div>
         <button
           onClick={() => setShowImportTools((value) => !value)}
-          className="text-sm font-medium text-green-700 hover:underline"
+          className="text-sm font-medium text-green-700 underline"
         >
           {showImportTools ? "Ocultar herramientas de carga masiva" : "Cargar varios productos a la vez (IA o Excel)"}
         </button>
