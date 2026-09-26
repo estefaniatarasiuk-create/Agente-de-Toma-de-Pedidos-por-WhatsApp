@@ -6,11 +6,12 @@ import { createTestCompanyAndBranch, cleanupCompany } from "./fixtures";
 
 vi.mock("@/lib/geocoding", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/geocoding")>();
-  return { ...actual, geocodeAddress: vi.fn() };
+  return { ...actual, geocodeAddress: vi.fn(), reverseGeocodeLocality: vi.fn() };
 });
 
-const { geocodeAddress } = await import("@/lib/geocoding");
+const { geocodeAddress, reverseGeocodeLocality } = await import("@/lib/geocoding");
 const geocodeAddressMock = vi.mocked(geocodeAddress);
+const reverseGeocodeLocalityMock = vi.mocked(reverseGeocodeLocality);
 
 // Regresión de un bug real reportado en la Fase 4: una dirección mal escrita
 // o incompleta (ej. "guidi de franc 1510" sin el "Cid" de "Cid Guidi de
@@ -69,6 +70,112 @@ describe("applyActions — set_customer_info fuera de zona", () => {
     expect(result.correctionNotes.some((note) => note.toLowerCase().includes("fuera de nuestra zona"))).toBe(true);
     expect(result.requiresHuman).toBe(false);
     expect(result.orderCreated).toBe(false);
+  });
+});
+
+// Pedido explícito del usuario: si la dirección da "fuera de zona" en la
+// primera pasada, pero restringiendo la búsqueda a la localidad del local
+// encontramos algo parecido DENTRO de la zona, se le propone al cliente en
+// vez de rechazarla de plano o aceptarla en silencio.
+describe("applyActions — propone una corrección de domicilio en vez de rechazarlo de plano", () => {
+  const companiesToCleanup: string[] = [];
+
+  afterAll(async () => {
+    for (const companyId of companiesToCleanup) await cleanupCompany(companyId);
+  });
+
+  it("propone la dirección encontrada en la localidad del local y no confirma el pedido todavía", async () => {
+    const { company, branch } = await createTestCompanyAndBranch();
+    companiesToCleanup.push(company.id);
+    await prisma.deliveryZone.create({
+      data: { companyId: company.id, branchId: branch.id, centerLatitude: -34.6083, centerLongitude: -58.3712, radiusKm: 5 },
+    });
+    const product = await prisma.product.create({
+      data: { companyId: company.id, branchId: branch.id, name: "Chipa", priceCents: 300000 },
+    });
+    const conversation = await prisma.conversation.create({
+      data: { companyId: company.id, branchId: branch.id, customerPhone: "5491100000015" },
+    });
+
+    // Primera pasada (sin restringir a la localidad): resuelve lejos.
+    geocodeAddressMock.mockResolvedValueOnce({
+      latitude: -31.4201,
+      longitude: -64.1888,
+      formattedAddress: "Guidi de Franc, Córdoba, Argentina",
+      partialMatch: false,
+      fromCache: false,
+    });
+    reverseGeocodeLocalityMock.mockResolvedValueOnce("Villa Centenario");
+    // Reintento restringido a la localidad: resuelve cerca, dentro de zona.
+    geocodeAddressMock.mockResolvedValueOnce({
+      latitude: -34.61,
+      longitude: -58.3745,
+      formattedAddress: "Cid Guidi de Franc 1510, Villa Centenario, Argentina",
+      partialMatch: false,
+      fromCache: false,
+    });
+
+    const draft = {
+      items: [{ productId: product.id, productName: product.name, unitPriceCents: product.priceCents, quantity: 1 }],
+      customerName: "Cliente Test",
+      paymentMethod: "CASH" as const,
+    };
+
+    const result = await applyActions({
+      companyId: company.id,
+      branchId: branch.id,
+      conversationId: conversation.id,
+      customerPhone: "5491100000015",
+      draft,
+      actions: [{ type: "set_customer_info", address: "guidi de franc 1510" }],
+    });
+
+    expect(result.draft.deliveryAddressRaw).toBeUndefined();
+    expect(result.draft.pendingAddressSuggestion?.formattedAddress).toBe("Cid Guidi de Franc 1510, Villa Centenario, Argentina");
+    expect(result.correctionNotes.some((note) => note.includes("¿Quisiste decir"))).toBe(true);
+    expect(result.orderCreated).toBe(false);
+  });
+
+  it("acepta la propuesta si el cliente responde algo que suena a un sí, sin repetir la dirección", async () => {
+    const { company, branch } = await createTestCompanyAndBranch();
+    companiesToCleanup.push(company.id);
+    await prisma.deliveryZone.create({
+      data: { companyId: company.id, branchId: branch.id, centerLatitude: -34.6083, centerLongitude: -58.3712, radiusKm: 5 },
+    });
+    const product = await prisma.product.create({
+      data: { companyId: company.id, branchId: branch.id, name: "Chipa", priceCents: 300000 },
+    });
+    await prisma.paymentMethodConfig.create({
+      data: { companyId: company.id, branchId: branch.id, cashEnabled: true, transferEnabled: false },
+    });
+    const conversation = await prisma.conversation.create({
+      data: { companyId: company.id, branchId: branch.id, customerPhone: "5491100000016" },
+    });
+
+    const draftWithSuggestion = {
+      items: [{ productId: product.id, productName: product.name, unitPriceCents: product.priceCents, quantity: 1 }],
+      customerName: "Cliente Test",
+      paymentMethod: "CASH" as const,
+      pendingAddressSuggestion: {
+        formattedAddress: "Cid Guidi de Franc 1510, Villa Centenario, Argentina",
+        latitude: -34.61,
+        longitude: -58.3745,
+      },
+    };
+
+    const result = await applyActions({
+      companyId: company.id,
+      branchId: branch.id,
+      conversationId: conversation.id,
+      customerPhone: "5491100000016",
+      draft: draftWithSuggestion,
+      actions: [],
+      customerMessageText: "si, es esa",
+    });
+
+    expect(result.draft.pendingAddressSuggestion).toBeUndefined();
+    expect(result.draft.deliveryAddressRaw).toBe("Cid Guidi de Franc 1510, Villa Centenario, Argentina");
+    expect(result.draft.deliveryLatitude).toBe(-34.61);
   });
 });
 

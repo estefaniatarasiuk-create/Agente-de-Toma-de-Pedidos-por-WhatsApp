@@ -25,6 +25,15 @@ export const draftOrderStateSchema = z.object({
   // establecido en el mismo turno). Es la salida de emergencia para no
   // quedar rebotando para siempre: ver apply-actions.ts.
   confirmAttempts: z.number().int().nonnegative().optional(),
+  // Cuando la dirección que dio el cliente no geocodificó dentro de la
+  // zona, pero SÍ encontramos algo parecido restringiendo la búsqueda a la
+  // localidad del local, se guarda acá como propuesta en vez de aceptarla
+  // en silencio — el cliente tiene que confirmarla antes de que cuente
+  // como su domicilio real (pedido explícito del usuario en Fase 4). Ver
+  // apply-actions.ts y zone-validation.ts.
+  pendingAddressSuggestion: z
+    .object({ formattedAddress: z.string(), latitude: z.number(), longitude: z.number() })
+    .optional(),
 });
 
 export type DraftOrderState = z.infer<typeof draftOrderStateSchema>;

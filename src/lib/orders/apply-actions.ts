@@ -83,6 +83,28 @@ export async function applyActions(params: {
     return { draft, correctionNotes: [], extras: [], requiresHuman: true, orderCreated: false };
   }
 
+  // Hay una dirección corregida propuesta esperando confirmación (ver
+  // zone-validation.ts): si el cliente responde con algo que suena a un
+  // "sí" y no dio una dirección nueva en este mismo turno, se toma como
+  // que confirmó la propuesta — código, no la IA, decide esto, para no
+  // depender de que el modelo repita el texto exacto de la sugerencia.
+  const hasNewAddressThisTurn = params.actions.some(
+    (action) => action.type === "set_customer_info" && Boolean(action.address),
+  );
+  if (
+    draft.pendingAddressSuggestion &&
+    !hasNewAddressThisTurn &&
+    !params.assumeConfirmed &&
+    looksLikeConfirmationText(params.customerMessageText ?? "")
+  ) {
+    draft.deliveryAddressRaw = draft.pendingAddressSuggestion.formattedAddress;
+    draft.deliveryAddressNormalized = draft.pendingAddressSuggestion.formattedAddress;
+    draft.deliveryLatitude = draft.pendingAddressSuggestion.latitude;
+    draft.deliveryLongitude = draft.pendingAddressSuggestion.longitude;
+    draft.pendingAddressSuggestion = undefined;
+    draftChangedThisTurn = true;
+  }
+
   for (const action of params.actions) {
     if (action.type === "add_item") {
       const product = await findProductMatch(params.branchId, action.productName);
@@ -132,6 +154,10 @@ export async function applyActions(params: {
       if (action.addressNotes) draft.deliveryAddressNotes = action.addressNotes;
 
       if (action.address) {
+        // Cualquier intento nuevo de dirección reemplaza a una propuesta
+        // pendiente anterior — la respuesta a ESTE intento decide qué pasa.
+        draft.pendingAddressSuggestion = undefined;
+
         const validation = await validateDeliveryAddress(params.branchId, action.address);
         if (validation.status === "ok") {
           // La IA reemite set_customer_info con la misma dirección casi cada
@@ -175,6 +201,20 @@ export async function applyActions(params: {
           draft.deliveryAddressNormalized = undefined;
           draft.deliveryLatitude = undefined;
           draft.deliveryLongitude = undefined;
+        } else if (validation.status === "suggested_correction") {
+          // Pedido explícito del usuario: en vez de rechazar de plano o
+          // aceptar en silencio una coincidencia que restringimos a la
+          // localidad del local, se le propone al cliente para que confirme
+          // — se acepta sola en el próximo turno si el cliente responde algo
+          // que suene a un "sí" (ver el chequeo al principio de esta función).
+          draft.pendingAddressSuggestion = {
+            formattedAddress: validation.formattedAddress,
+            latitude: validation.latitude,
+            longitude: validation.longitude,
+          };
+          correctionNotes.push(
+            `No encontré esa dirección tal cual. ¿Quisiste decir "${validation.formattedAddress}"? Contame si es así para confirmarlo, o si no, decime de nuevo con más detalle.`,
+          );
         } else if (validation.status === "ambiguous") {
           correctionNotes.push(buildAmbiguousAddressMessage());
         } else if (validation.status === "geocoding_unavailable") {

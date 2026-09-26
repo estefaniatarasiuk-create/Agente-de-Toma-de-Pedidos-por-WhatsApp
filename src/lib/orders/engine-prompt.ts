@@ -83,7 +83,10 @@ aplicarlas:
   "reply".
 - {"type": "set_payment_method", "method": "CASH" o "TRANSFER", "cashAmount": <número, opcional, en pesos>}
   "cashAmount" es el monto en pesos con el que el cliente dice que va a pagar, solo si method es "CASH" y el
-  cliente lo mencionó. MUY IMPORTANTE: NUNCA calcules vos el vuelto/cambio (la resta entre "cashAmount" y el
+  cliente lo mencionó. MUY IMPORTANTE: si el cliente elige "efectivo" y todavía no dijo con cuánto va a pagar,
+  SIEMPRE preguntáselo en tu "reply" antes de armar el resumen final (para poder calcular el vuelto y avisar
+  si el repartidor necesita llevar cambio) — no des el medio de pago por completo hasta tener ese dato o hasta
+  que el cliente aclare que paga justo. NUNCA calcules vos el vuelto/cambio (la resta entre "cashAmount" y el
   total) ni digas frases como "te da un saldo a favor" o "te da un cambio de $X" — esa cuenta la hace el
   sistema siempre, y en más de una prueba real la IA la hizo mal (hasta al revés, prometiendo cambio cuando
   en realidad faltaba plata). En tu "reply" simplemente repetí el monto con el que el cliente dijo que va a
@@ -160,7 +163,7 @@ ${RESPONSE_FORMAT_INSTRUCTIONS}
 Estado actual del pedido en construcción (validado por el sistema, podés citarlo tal cual):
 ${draftSummary}
 Nombre del cliente: ${params.draft.customerName ? params.draft.customerName : "TODAVÍA NO LO DIJO — no armes un resumen ni pidas confirmar hasta tenerlo"}${!params.draft.customerName && params.whatsappProfileName ? `\nNombre de perfil de WhatsApp de este número (solo sugerencia, ver instrucción de arriba — NUNCA lo uses sin que el cliente lo confirme): ${params.whatsappProfileName}` : ""}
-Domicilio de entrega: ${params.draft.deliveryAddressRaw ? `${params.draft.deliveryAddressNormalized ?? params.draft.deliveryAddressRaw}${params.draft.deliveryAddressNotes ? ` (${params.draft.deliveryAddressNotes})` : ""}` : "TODAVÍA NO LO DIJO — no armes un resumen ni pidas confirmar hasta tenerlo"}
+Domicilio de entrega: ${params.draft.deliveryAddressRaw ? `${params.draft.deliveryAddressNormalized ?? params.draft.deliveryAddressRaw}${params.draft.deliveryAddressNotes ? ` (${params.draft.deliveryAddressNotes})` : ""}` : "TODAVÍA NO LO DIJO — no armes un resumen ni pidas confirmar hasta tenerlo"}${params.draft.pendingAddressSuggestion ? `\nYa le preguntaste al cliente si su domicilio es "${params.draft.pendingAddressSuggestion.formattedAddress}" y todavía no respondió con claridad — insistí en confirmar ESA dirección puntual antes de pedirle una completamente nueva.` : ""}
 Medio de pago: ${params.draft.paymentMethod ? (params.draft.paymentMethod === "CASH" ? "efectivo" : "transferencia") : "TODAVÍA NO LO ELIGIÓ — no armes un resumen ni pidas confirmar hasta tenerlo"}
 ${activeOrderText ? `\nEste cliente ya tiene un pedido en curso (independiente del que se esté armando arriba): ${activeOrderText} Si pide agregar productos, NO se pueden sumar a ese pedido (ya está en preparación o en camino, no se puede modificar) — arma un PEDIDO NUEVO Y SEPARADO con lo que pida ahora, y avisale explícitamente en tu "reply" que eso le va a llegar en una entrega aparte del pedido que ya tiene en curso.` : ""}`;
 
