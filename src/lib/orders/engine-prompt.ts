@@ -82,7 +82,12 @@ aplicarlas:
   pedíselo en tu "reply".
 - {"type": "set_payment_method", "method": "CASH" o "TRANSFER", "cashAmount": <número, opcional, en pesos>}
   "cashAmount" es el monto en pesos con el que el cliente dice que va a pagar, solo si method es "CASH" y el
-  cliente lo mencionó. MUY IMPORTANTE: si el cliente elige "efectivo" y todavía no dijo con cuánto va a pagar,
+  cliente lo mencionó. MUY IMPORTANTE: en Argentina es común abreviar miles hablando ("20" por "20 mil",
+  "50" por "50 mil"). Si el cliente da un número que, tomado literal, da MENOS que el total del pedido (por
+  ejemplo el total es $9.000 y dice "20"), NO asumas que quiso decir $20 pesos — preguntale para confirmar
+  ("¿son $20.000?") en vez de mandar "cashAmount" con el valor literal. Solo mandá el número tal cual si es
+  razonable frente al total, o si el cliente ya aclaró la unidad (dijo "mil" o el número completo).
+  MUY IMPORTANTE: si el cliente elige "efectivo" y todavía no dijo con cuánto va a pagar,
   SIEMPRE preguntáselo en tu "reply" antes de armar el resumen final (para poder calcular el vuelto y avisar
   si el repartidor necesita llevar cambio) — no des el medio de pago por completo hasta tener ese dato o hasta
   que el cliente aclare que paga justo. NUNCA calcules vos el vuelto/cambio (la resta entre "cashAmount" y el
@@ -152,7 +157,7 @@ ${draftSummary}
 Nombre del cliente: ${params.draft.customerName ? params.draft.customerName : "TODAVÍA NO LO DIJO — no armes un resumen ni pidas confirmar hasta tenerlo"}
 Domicilio de entrega: ${params.draft.deliveryAddressRaw ? `${params.draft.deliveryAddressNormalized ?? params.draft.deliveryAddressRaw}${params.draft.deliveryAddressNotes ? ` (${params.draft.deliveryAddressNotes})` : ""}` : "TODAVÍA NO LO DIJO — no armes un resumen ni pidas confirmar hasta tenerlo"}${params.draft.pendingAddressSuggestion ? `\nYa le preguntaste al cliente si su domicilio es "${params.draft.pendingAddressSuggestion.formattedAddress}" y todavía no respondió con claridad — insistí en confirmar ESA dirección puntual antes de pedirle una completamente nueva.` : ""}
 Medio de pago: ${params.draft.paymentMethod ? (params.draft.paymentMethod === "CASH" ? "efectivo" : "transferencia") : "TODAVÍA NO LO ELIGIÓ — no armes un resumen ni pidas confirmar hasta tenerlo"}
-${activeOrderText ? `\nEste cliente ya tiene un pedido en curso (independiente del que se esté armando arriba): ${activeOrderText} Si pide agregar productos, NO se pueden sumar a ese pedido (ya está en preparación o en camino, no se puede modificar) — arma un PEDIDO NUEVO Y SEPARADO con lo que pida ahora, y avisale explícitamente en tu "reply" que eso le va a llegar en una entrega aparte del pedido que ya tiene en curso.` : ""}`;
+${activeOrderText ? `\nEste cliente ya tiene un pedido en curso (independiente del que se esté armando arriba): ${activeOrderText} Si pide agregar productos, NO se pueden sumar a ese pedido (ya está en preparación o en camino, no se puede modificar) — arma un PEDIDO NUEVO Y SEPARADO con lo que pida ahora, y avisale explícitamente en tu "reply" que eso le va a llegar en una entrega aparte del pedido que ya tiene en curso. Si en cambio el cliente está corrigiendo un dato de ESE pedido (ej. "me equivoqué, son $20.000 no $20"), repetí los mismos productos, nombre y domicilio de ese pedido junto con el dato corregido y confirmá de nuevo — el sistema reconoce que es una corrección del mismo pedido y lo actualiza, en vez de duplicarlo.` : ""}`;
 
   return { branchName, system };
 }

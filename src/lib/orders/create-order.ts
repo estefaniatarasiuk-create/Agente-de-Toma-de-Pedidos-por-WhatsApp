@@ -10,6 +10,23 @@ export type CreateOrderResult =
   | { status: "missing_info"; missing: string[] }
   | { status: "payment_not_enabled" };
 
+const DUPLICATE_ORDER_WINDOW_MINUTES = 10;
+
+// Compara los ítems de dos pedidos por producto+cantidad, sin importar el
+// orden — para detectar cuándo un "nuevo" pedido es en realidad el mismo
+// que uno reciente (ver el chequeo de duplicados más abajo).
+function haveSameItems(
+  existingItems: Array<{ productId: string | null; quantity: number }>,
+  newItems: Array<{ productId: string; quantity: number }>,
+): boolean {
+  if (existingItems.length !== newItems.length) return false;
+  // Un ítem sin productId (el producto se borró después) no se puede
+  // comparar con confianza — mejor no tratarlo como duplicado.
+  if (existingItems.some((item) => item.productId === null)) return false;
+  const existingByProduct = new Map(existingItems.map((item) => [item.productId, item.quantity]));
+  return newItems.every((item) => existingByProduct.get(item.productId) === item.quantity);
+}
+
 // Punto único donde un pedido pasa de "borrador de chat" a fila real en la
 // base. Todo lo que importa (precios, medio de pago habilitado, demora
 // vigente) se recalcula acá desde la configuración actual — el draft que
@@ -67,6 +84,40 @@ export async function createOrderFromDraft(params: {
     draft.paymentMethod === "CASH" && draft.cashPaymentAmountCents !== undefined
       ? Math.max(0, draft.cashPaymentAmountCents - totalCents)
       : null;
+
+  // Bug real reportado: después de confirmar un pedido, el cliente quiso
+  // corregir un dato menor (cuánto efectivo iba a pagar) — la IA, en vez de
+  // solo actualizar ese dato, rearmó TODO el pedido de cero (mismos
+  // productos) y confirmó una segunda vez, duplicándolo en el tablero. Si
+  // hay un pedido reciente (mismo cliente, mismos productos, todavía no
+  // cancelado) creado hace pocos minutos, se actualiza el medio de pago y
+  // el nombre de ESE pedido en vez de crear uno nuevo — nunca se toca el
+  // domicilio ya guardado (la reconstrucción de la IA puede traer una
+  // dirección peor que la que ya se había validado).
+  const recentDuplicate = await prisma.order.findFirst({
+    where: {
+      branchId,
+      customerPhone,
+      status: { in: ["WAITING_RECEIPT", "PENDING"] },
+      createdAt: { gte: new Date(Date.now() - DUPLICATE_ORDER_WINDOW_MINUTES * 60_000) },
+    },
+    orderBy: { createdAt: "desc" },
+    include: { items: true },
+  });
+
+  if (recentDuplicate && haveSameItems(recentDuplicate.items, draft.items)) {
+    const updated = await prisma.order.update({
+      where: { id: recentDuplicate.id },
+      data: {
+        customerName: draft.customerName!,
+        paymentMethod: draft.paymentMethod!,
+        cashPaymentAmountCents: draft.cashPaymentAmountCents,
+        changeAmountCents,
+        status,
+      },
+    });
+    return { status: "created", order: updated, totalCents, changeAmountCents };
+  }
 
   const order = await prisma.order.create({
     data: {
