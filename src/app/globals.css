@@ -12,12 +12,15 @@
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
+/* No hay soporte de modo oscuro en ningún componente del panel (todo usa
+   bg-white/text-gray-900 fijos, sin variantes dark:) — este bloque no
+   "activaba" un modo oscuro terminado, solo pintaba el fondo de <body> de
+   negro con el navegador/SO en modo oscuro, mientras el resto de cada
+   pantalla seguía usando texto oscuro pensado para fondo blanco. El
+   resultado: título y texto fuera de las tarjetas blancas casi invisibles
+   en TODAS las pantallas (bug real reportado por el cliente, con capturas).
+   Hasta que se construya un modo oscuro real con sus propios colores, el
+   panel siempre usa colores claros, sin importar la preferencia del SO. */
 
 body {
   background: var(--background);
