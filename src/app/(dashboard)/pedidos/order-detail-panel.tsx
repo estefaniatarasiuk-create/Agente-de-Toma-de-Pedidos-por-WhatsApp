@@ -392,12 +392,28 @@ export function OrderDetailPanel({
                 {order.receiptUrl && (
                   <div className="mt-2">
                     <p className="text-xs text-gray-600">Comprobante recibido:</p>
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={`/api/uploads/${order.receiptUrl}`}
-                      alt="Comprobante de transferencia"
-                      className="mt-1 max-h-64 rounded-md border border-gray-200"
-                    />
+                    {/* Un comprobante puede llegar como PDF (muy común: el
+                        home banking o Mercado Pago lo exportan así) — un
+                        <img> no puede mostrar un PDF, se ve como una imagen
+                        rota y parece que "no se lee" el archivo. Se abre en
+                        una pestaña aparte en vez de intentar incrustarlo. */}
+                    {order.receiptUrl.toLowerCase().endsWith(".pdf") ? (
+                      <a
+                        href={`/api/uploads/${order.receiptUrl}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="mt-1 inline-block rounded-md border border-gray-300 px-3 py-2 text-sm font-medium text-green-700 underline"
+                      >
+                        Ver comprobante (PDF)
+                      </a>
+                    ) : (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={`/api/uploads/${order.receiptUrl}`}
+                        alt="Comprobante de transferencia"
+                        className="mt-1 max-h-64 rounded-md border border-gray-200"
+                      />
+                    )}
                     {order.paymentValidated && (
                       <p className="mt-1 text-xs font-medium text-green-700">✓ Comprobante validado</p>
                     )}
