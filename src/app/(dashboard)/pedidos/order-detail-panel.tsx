@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { ConversationStatus, Order, OrderItem, OrderStatus, OrderStatusEvent, Product } from "@prisma/client";
 import { formatCentsAsArs } from "@/lib/money";
+import { isImageFileUrl } from "@/lib/media-url";
 import { ORDER_STATUS_LABEL, ORDER_STATUS_BADGE_CLASS } from "@/lib/orders/order-status";
 
 type OrderDetail = Order & {
@@ -397,7 +398,14 @@ export function OrderDetailPanel({
                         <img> no puede mostrar un PDF, se ve como una imagen
                         rota y parece que "no se lee" el archivo. Se abre en
                         una pestaña aparte en vez de intentar incrustarlo. */}
-                    {order.receiptUrl.toLowerCase().endsWith(".pdf") ? (
+                    {isImageFileUrl(order.receiptUrl) ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={`/api/uploads/${order.receiptUrl}`}
+                        alt="Comprobante de transferencia"
+                        className="mt-1 max-h-64 rounded-md border border-gray-200"
+                      />
+                    ) : (
                       <a
                         href={`/api/uploads/${order.receiptUrl}`}
                         target="_blank"
@@ -406,13 +414,6 @@ export function OrderDetailPanel({
                       >
                         Ver comprobante (PDF)
                       </a>
-                    ) : (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={`/api/uploads/${order.receiptUrl}`}
-                        alt="Comprobante de transferencia"
-                        className="mt-1 max-h-64 rounded-md border border-gray-200"
-                      />
                     )}
                     {order.paymentValidated && (
                       <p className="mt-1 text-xs font-medium text-green-700">✓ Comprobante validado</p>

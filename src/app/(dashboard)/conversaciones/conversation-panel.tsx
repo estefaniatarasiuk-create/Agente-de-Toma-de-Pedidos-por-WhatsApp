@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { Conversation, ConversationStatus, Message, Order } from "@prisma/client";
+import { isImageFileUrl } from "@/lib/media-url";
 
 type MessageWithSender = Message & { sentByUser: { name: string } | null };
 type ConversationDetail = Conversation & { messages: MessageWithSender[]; orders: Order[] };
@@ -21,6 +22,32 @@ function messageLabel(message: MessageWithSender): string {
   if (message.messageType === "IMAGE") return "[imagen]";
   if (message.messageType === "DOCUMENT") return "[documento]";
   return `[${message.messageType.toLowerCase()}]`;
+}
+
+// Bug real reportado: una imagen o PDF que mandaba el cliente (ej. un
+// comprobante reenviado a pedido del local) se mostraba en el chat como el
+// texto "[imagen]"/"[documento]", sin ninguna forma de abrirlo — no había
+// cómo verlo. Se muestra la vista previa (imagen) o un enlace para abrirlo
+// (PDF) en vez del placeholder de texto.
+function MessageAttachment({ mediaUrl, isOutbound }: { mediaUrl: string; isOutbound: boolean }) {
+  if (isImageFileUrl(mediaUrl)) {
+    return (
+      <a href={`/api/uploads/${mediaUrl}`} target="_blank" rel="noopener noreferrer">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={`/api/uploads/${mediaUrl}`} alt="Adjunto" className="max-h-48 rounded-md" />
+      </a>
+    );
+  }
+  return (
+    <a
+      href={`/api/uploads/${mediaUrl}`}
+      target="_blank"
+      rel="noopener noreferrer"
+      className={`inline-block underline ${isOutbound ? "text-white" : "text-green-700"}`}
+    >
+      Ver documento (PDF)
+    </a>
+  );
 }
 
 export function ConversationPanel({ conversationId, onChanged }: { conversationId: string; onChanged: () => void }) {
@@ -135,6 +162,8 @@ export function ConversationPanel({ conversationId, onChanged }: { conversationI
       <div className="flex-1 space-y-3 overflow-y-auto bg-gray-50 p-4">
         {conversation.messages.map((message) => {
           const isOutbound = message.direction === "OUTBOUND";
+          const mediaUrl = message.mediaUrl;
+          const showsAttachment = Boolean(mediaUrl) && (message.messageType === "IMAGE" || message.messageType === "DOCUMENT");
           return (
             <div key={message.id} className={`flex ${isOutbound ? "justify-end" : "justify-start"}`}>
               <div
@@ -142,7 +171,12 @@ export function ConversationPanel({ conversationId, onChanged }: { conversationI
                   isOutbound ? "bg-green-600 text-white" : "bg-white text-gray-800 shadow-sm"
                 }`}
               >
-                <p className="whitespace-pre-wrap">{messageLabel(message)}</p>
+                {showsAttachment && mediaUrl && <MessageAttachment mediaUrl={mediaUrl} isOutbound={isOutbound} />}
+                {message.textContent ? (
+                  <p className={`whitespace-pre-wrap ${showsAttachment ? "mt-1" : ""}`}>{message.textContent}</p>
+                ) : !showsAttachment ? (
+                  <p className="whitespace-pre-wrap">{messageLabel(message)}</p>
+                ) : null}
                 <p className={`mt-1 text-[10px] ${isOutbound ? "text-green-100" : "text-gray-500"}`}>
                   {new Date(message.createdAt).toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" })}
                   {message.sentByUser ? ` · ${message.sentByUser.name}` : isOutbound ? " · IA" : ""}

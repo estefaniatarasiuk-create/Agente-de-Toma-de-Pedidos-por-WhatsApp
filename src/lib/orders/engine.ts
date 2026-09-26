@@ -150,16 +150,28 @@ async function processInboundMessageLocked(params: { conversationId: string; mes
   // comprobante" y este mensaje es una imagen/documento, se adjunta directo
   // (spec §3.4) sin pasar por la IA.
   if (message.direction === "INBOUND" && (message.messageType === "IMAGE" || message.messageType === "DOCUMENT") && message.mediaUrl) {
+    // Bug real reportado: si el local le pedía al cliente que volviera a
+    // mandar el comprobante (ej. no se veía bien, o directamente se lo
+    // pidieron de nuevo desde la conversación), el segundo archivo nunca se
+    // adjuntaba — el filtro "receiptUrl: null" solo dejaba pasar el
+    // PRIMERO. Ahora cualquier imagen/documento mientras el pedido siga
+    // "esperando comprobante" pisa el anterior: el que queda en el pedido
+    // (tablero y detalle) es siempre el último que mandó el cliente.
     const waitingOrder = await prisma.order.findFirst({
-      where: { branchId: conversation.branchId, customerPhone: conversation.customerPhone, status: "WAITING_RECEIPT", receiptUrl: null },
+      where: { branchId: conversation.branchId, customerPhone: conversation.customerPhone, status: "WAITING_RECEIPT" },
       orderBy: { createdAt: "desc" },
     });
     if (waitingOrder) {
+      const isResend = waitingOrder.receiptUrl !== null;
       await prisma.order.update({
         where: { id: waitingOrder.id },
         data: { receiptUrl: message.mediaUrl, receiptReceivedAt: new Date() },
       });
-      await sendText("¡Recibimos tu comprobante! Ya lo estamos verificando y en breve pasa a preparación.");
+      await sendText(
+        isResend
+          ? "¡Recibimos el comprobante actualizado! Ya lo estamos revisando."
+          : "¡Recibimos tu comprobante! Ya lo estamos verificando y en breve pasa a preparación.",
+      );
       return;
     }
 
