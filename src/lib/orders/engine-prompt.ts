@@ -76,8 +76,11 @@ aplicarlas:
 - {"type": "set_customer_info", "name": "...", "address": "...", "addressNotes": "..."}
   Mandá el/los campos que el cliente haya dado en este mensaje (no hace falta repetir los que ya tenías).
   "address" tiene que incluir calle y altura como mínimo. MUY IMPORTANTE: "name" tiene que ser el nombre que
-  el cliente escribió de verdad. NUNCA inventes un valor genérico como "Cliente" cuando todavía no te lo
-  dijo — si no te dio el nombre, no mandes el campo "name" en absoluto, y pedíselo en tu "reply".
+  el cliente escribió de verdad, o confirmó explícitamente que usemos (ver "Nombre de perfil de WhatsApp" más
+  abajo). NUNCA inventes un valor genérico como "Cliente" cuando todavía no te lo dijo, y NUNCA uses el
+  nombre de perfil de WhatsApp sin que el cliente lo haya confirmado en la conversación (aunque suene
+  razonable) — si no tenés ninguno de los dos, no mandes el campo "name" en absoluto, y pedíselo en tu
+  "reply".
 - {"type": "set_payment_method", "method": "CASH" o "TRANSFER", "cashAmount": <número, opcional, en pesos>}
   "cashAmount" es el monto en pesos con el que el cliente dice que va a pagar, solo si method es "CASH" y el
   cliente lo mencionó. MUY IMPORTANTE: NUNCA calcules vos el vuelto/cambio (la resta entre "cashAmount" y el
@@ -127,12 +130,24 @@ tener el actual, pero tampoco te quedes callada esperando: siempre proponé qué
 MUY IMPORTANTE: nunca le muestres al cliente un "resumen" del pedido pidiéndole que confirme si en "Estado
 actual del pedido" de abajo todavía falta el nombre, el domicilio, o el medio de pago — eso lo confunde
 (le hace pensar que ya está todo listo cuando en realidad falta algo). Revisá siempre esa sección antes de
-armar un resumen: si falta algo, pedíselo primero.`;
+armar un resumen: si falta algo, pedíselo primero.
+MUY IMPORTANTE sobre el nombre: si más abajo aparece un "Nombre de perfil de WhatsApp" y el cliente todavía
+no dio un nombre para el pedido, podés ofrecerlo como sugerencia en tu "reply" (por ejemplo: "¿Uso el nombre
+de tu WhatsApp, [nombre], o preferís darme otro?") — pero NUNCA lo des por confirmado ni lo mandes en
+"set_customer_info" hasta que el cliente responda algo (que sí, o un nombre distinto). Ese nombre de perfil
+suele ser un apodo, un alias, o el nombre de otra persona — nunca asumas que es el nombre real para la
+entrega sin que el cliente lo confirme explícitamente.`;
 
 export async function buildEngineSystemPrompt(params: {
   branchId: string;
   customerPhone: string;
   draft: DraftOrderState;
+  // Nombre de perfil de WhatsApp del número del cliente (si lo hay). Es
+  // solo una sugerencia para que la IA se la ofrezca al cliente — nunca se
+  // usa como el nombre del pedido sin que el cliente lo confirme (pedido
+  // explícito del usuario: un apodo de WhatsApp no es el nombre real para
+  // la entrega).
+  whatsappProfileName?: string | null;
 }): Promise<{ branchName: string; system: string }> {
   const { branchName, block } = await buildBranchConfigBlock(params.branchId);
   const draftSummary = buildDraftSummary(params.draft);
@@ -144,7 +159,7 @@ ${RESPONSE_FORMAT_INSTRUCTIONS}
 
 Estado actual del pedido en construcción (validado por el sistema, podés citarlo tal cual):
 ${draftSummary}
-Nombre del cliente: ${params.draft.customerName ? params.draft.customerName : "TODAVÍA NO LO DIJO — no armes un resumen ni pidas confirmar hasta tenerlo"}
+Nombre del cliente: ${params.draft.customerName ? params.draft.customerName : "TODAVÍA NO LO DIJO — no armes un resumen ni pidas confirmar hasta tenerlo"}${!params.draft.customerName && params.whatsappProfileName ? `\nNombre de perfil de WhatsApp de este número (solo sugerencia, ver instrucción de arriba — NUNCA lo uses sin que el cliente lo confirme): ${params.whatsappProfileName}` : ""}
 Domicilio de entrega: ${params.draft.deliveryAddressRaw ? `${params.draft.deliveryAddressNormalized ?? params.draft.deliveryAddressRaw}${params.draft.deliveryAddressNotes ? ` (${params.draft.deliveryAddressNotes})` : ""}` : "TODAVÍA NO LO DIJO — no armes un resumen ni pidas confirmar hasta tenerlo"}
 Medio de pago: ${params.draft.paymentMethod ? (params.draft.paymentMethod === "CASH" ? "efectivo" : "transferencia") : "TODAVÍA NO LO ELIGIÓ — no armes un resumen ni pidas confirmar hasta tenerlo"}
 ${activeOrderText ? `\nEste cliente ya tiene un pedido en curso (independiente del que se esté armando arriba): ${activeOrderText} Si pide agregar productos, NO se pueden sumar a ese pedido (ya está en preparación o en camino, no se puede modificar) — arma un PEDIDO NUEVO Y SEPARADO con lo que pida ahora, y avisale explícitamente en tu "reply" que eso le va a llegar en una entrega aparte del pedido que ya tiene en curso.` : ""}`;

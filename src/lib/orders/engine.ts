@@ -136,14 +136,13 @@ async function processInboundMessageLocked(params: { conversationId: string; mes
     draft = { items: [] };
   }
 
-  // El nombre de perfil de WhatsApp (Message/Conversation.customerName) es un
-  // dato ya confiable que llega solo con el primer mensaje — no depende de
-  // que la IA se lo pida al cliente y lo capture bien. Si todavía no hay un
-  // nombre puesto para el pedido, se usa como default (el cliente puede
-  // pedir otro nombre distinto para la entrega, la IA lo puede pisar).
-  if (!draft.customerName && conversation.customerName) {
-    draft.customerName = conversation.customerName;
-  }
+  // Pedido explícito del usuario: antes, si el cliente no daba su nombre,
+  // se usaba en silencio el nombre de perfil de WhatsApp como si el
+  // cliente lo hubiera confirmado — pero ese nombre suele ser un apodo o
+  // un alias (emojis, nombre de fantasía, etc.), no el nombre real para la
+  // entrega. Ya NO se autocompleta: el nombre de perfil se le pasa a la IA
+  // solo como una sugerencia para preguntar y confirmar (ver
+  // engine-prompt.ts), nunca como un dato ya dado por cierto.
 
   // 2. Comprobante de un pedido en curso: si hay un pedido "esperando
   // comprobante" y este mensaje es una imagen/documento, se adjunta directo
@@ -201,6 +200,7 @@ async function processInboundMessageLocked(params: { conversationId: string; mes
     branchId: conversation.branchId,
     customerPhone: conversation.customerPhone,
     draft,
+    whatsappProfileName: conversation.customerName,
   });
 
   const history = await prisma.message.findMany({
