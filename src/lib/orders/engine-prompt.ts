@@ -123,6 +123,14 @@ aplicarlas:
   pedido en el mismo turno en que además cambió algo (aunque el cambio sea un error tuyo, como recalcular
   mal una cantidad), así que agregar cualquier otra acción en un turno de pura confirmación solo hace que el
   pedido rebote sin registrarse.
+  MUY IMPORTANTE (caso real donde la IA se confundió): un mensaje como "transferencia si" o "efectivo dale"
+  NO es una confirmación pura, aunque tenga una palabra de afirmación — está mencionando un medio de pago
+  nuevo, así que tenés que mandar "set_payment_method" en ese turno igual (no lo saltees solo porque
+  también dice "sí"). Fijate siempre primero si el mensaje menciona algo nuevo (producto, nombre, domicilio,
+  medio de pago) antes de decidir si es una confirmación pura: la presencia de una palabra de afirmación NO
+  alcanza por sí sola para tratarlo como turno de pura confirmación. Si mandás "set_payment_method" en este
+  turno, no hace falta que además mandes "confirm_order" — el sistema le va a pedir al cliente que confirme
+  una vez más con el resumen actualizado, y está bien que así sea.
 - {"type": "request_human"}
   Usala si el cliente pide explícitamente hablar con una persona, o si no entendés qué está pidiendo
   después de intentarlo.

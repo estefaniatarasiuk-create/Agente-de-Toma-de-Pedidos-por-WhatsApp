@@ -7,13 +7,23 @@ import type { PaymentMethodConfig } from "@prisma/client";
 // se le pide a la IA que los redacte, para garantizar que nunca inventa ni
 // desactualiza un número.
 
+// Pedido real reportado: el cliente recibía estos datos bancarios apenas
+// elegía transferencia (antes incluso de confirmar el pedido), y recién
+// mucho más tarde, al confirmar, se le pedía el comprobante — si
+// transfería en ese momento (algo que en la práctica pasa seguido), no
+// tenía ninguna indicación de qué hacer con el comprobante hasta bastante
+// después. Ahora el aviso de mandarlo ya está acá, desde el primer mensaje
+// con los datos de la cuenta.
 export function buildPaymentInfoMessage(payment: PaymentMethodConfig): string {
   const lines = ["Para pagar por transferencia, estos son los datos de la cuenta:"];
   if (payment.transferAlias) lines.push(`Alias: ${payment.transferAlias}`);
   if (payment.transferCbu) lines.push(`CBU: ${payment.transferCbu}`);
   if (payment.transferHolder) lines.push(`Titular: ${payment.transferHolder}`);
   if (payment.transferCuit) lines.push(`CUIT: ${payment.transferCuit}`);
-  lines.push("", "Verificá que los datos coincidan antes de transferir.");
+  lines.push(
+    "",
+    "Verificá que los datos coincidan antes de transferir. Después de transferir, mandanos por acá la foto o el PDF del comprobante.",
+  );
   return lines.join("\n");
 }
 
