@@ -261,7 +261,15 @@ async function processInboundMessageLocked(params: { conversationId: string; mes
     return;
   }
 
-  const { draft: updatedDraft, correctionNotes, extras, requiresHuman, orderCreated, preserveDraftOnEscalation } = await applyActions({
+  const {
+    draft: updatedDraft,
+    correctionNotes,
+    extras,
+    requiresHuman,
+    orderCreated,
+    orderId,
+    preserveDraftOnEscalation,
+  } = await applyActions({
     companyId: conversation.companyId,
     branchId: conversation.branchId,
     conversationId: conversation.id,
@@ -297,6 +305,42 @@ async function processInboundMessageLocked(params: { conversationId: string; mes
   const replyText = correctionNotes.length > 0 ? correctionNotes.join("\n\n") : parsedResponse.reply;
   await sendText(replyText);
   await sendExtras(extras);
+
+  // Bug real reportado: si el cliente manda el comprobante ANTES de escribir
+  // la confirmación final en texto (ej. apenas le dimos los datos
+  // bancarios, y recién después escribe "listo"/"confirmo"), el archivo
+  // queda guardado en la conversación pero en ese momento todavía no existe
+  // ningún pedido al que adjuntarlo — así que el mensaje de "pedido
+  // confirmado" (arriba, en "extras") le pedía el comprobante de nuevo
+  // aunque ya lo hubiera mandado. Acá, apenas se crea el pedido por
+  // transferencia, se busca la última imagen/documento entrante de esta
+  // conversación (de los últimos 30 minutos, y que no esté ya adjuntada a
+  // otro pedido) y se adjunta directo, avisándole que ya la recibimos.
+  if (orderCreated && orderId && draft.paymentMethod === "TRANSFER") {
+    const RECENT_RECEIPT_WINDOW_MINUTES = 30;
+    const recentReceiptMessage = await prisma.message.findFirst({
+      where: {
+        conversationId: conversation.id,
+        direction: "INBOUND",
+        messageType: { in: ["IMAGE", "DOCUMENT"] },
+        mediaUrl: { not: null },
+        createdAt: { gte: new Date(Date.now() - RECENT_RECEIPT_WINDOW_MINUTES * 60_000) },
+      },
+      orderBy: { createdAt: "desc" },
+    });
+    if (recentReceiptMessage?.mediaUrl) {
+      const alreadyUsedElsewhere = await prisma.order.findFirst({
+        where: { branchId: conversation.branchId, receiptUrl: recentReceiptMessage.mediaUrl },
+      });
+      if (!alreadyUsedElsewhere) {
+        await prisma.order.update({
+          where: { id: orderId },
+          data: { receiptUrl: recentReceiptMessage.mediaUrl, receiptReceivedAt: new Date() },
+        });
+        await sendText("¡Ah, veo que ya nos habías mandado el comprobante! Ya lo estamos revisando.");
+      }
+    }
+  }
 
   const nextStep = orderCreated ? null : computeCurrentStep(updatedDraft);
 
