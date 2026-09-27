@@ -47,12 +47,7 @@ async function processInboundMessageLocked(params: { conversationId: string; mes
     where: { id: params.conversationId },
     include: { branch: { include: { whatsappLine: true } } },
   });
-
-  // Un humano tomó la conversación, o la IA la tiene pausada: no respondemos
-  // automáticamente (Fase 4 le devuelve el control).
-  if (conversation.status === "REQUIRES_ATTENTION" || conversation.status === "AI_PAUSED" || conversation.status === "CLOSED") {
-    return;
-  }
+  const message = await prisma.message.findUniqueOrThrow({ where: { id: params.messageId } });
 
   const line = conversation.branch.whatsappLine;
   const accessToken = line?.accessTokenEncrypted ? decryptSecret(line.accessTokenEncrypted) : null;
@@ -66,6 +61,45 @@ async function processInboundMessageLocked(params: { conversationId: string; mes
       line,
       text,
     });
+  }
+
+  // Bug real reportado: con la IA pausada o la conversación derivada a un
+  // humano (ej. alguien usó "Hablar con el cliente" desde el pedido y le
+  // pidió reenviar el comprobante), el chequeo de "no respondemos
+  // automáticamente" de abajo cortaba ANTES de llegar a esta lógica — el
+  // archivo se guardaba en la conversación (por eso se veía en el chat) pero
+  // nunca se adjuntaba al pedido, así que el tablero seguía mostrando el
+  // comprobante viejo. Adjuntar el archivo al pedido no es "la IA
+  // respondiendo" (es solo guardar un dato), así que corre siempre, sin
+  // importar el estado de la conversación. El mensaje de acuse automático sí
+  // se sigue salteando si hay una persona atendiendo — no queremos que el
+  // bot conteste por su cuenta encima de lo que esté escribiendo el local.
+  if (message.direction === "INBOUND" && (message.messageType === "IMAGE" || message.messageType === "DOCUMENT") && message.mediaUrl) {
+    const waitingOrder = await prisma.order.findFirst({
+      where: { branchId: conversation.branchId, customerPhone: conversation.customerPhone, status: "WAITING_RECEIPT" },
+      orderBy: { createdAt: "desc" },
+    });
+    if (waitingOrder) {
+      const isResend = waitingOrder.receiptUrl !== null;
+      await prisma.order.update({
+        where: { id: waitingOrder.id },
+        data: { receiptUrl: message.mediaUrl, receiptReceivedAt: new Date() },
+      });
+      if (conversation.status === "ACTIVE") {
+        await sendText(
+          isResend
+            ? "¡Recibimos el comprobante actualizado! Ya lo estamos revisando."
+            : "¡Recibimos tu comprobante! Ya lo estamos verificando y en breve pasa a preparación.",
+        );
+      }
+      return;
+    }
+  }
+
+  // Un humano tomó la conversación, o la IA la tiene pausada: no respondemos
+  // automáticamente (Fase 4 le devuelve el control).
+  if (conversation.status === "REQUIRES_ATTENTION" || conversation.status === "AI_PAUSED" || conversation.status === "CLOSED") {
+    return;
   }
 
   async function sendCatalogImage() {
@@ -119,8 +153,6 @@ async function processInboundMessageLocked(params: { conversationId: string; mes
     ? draftOrderStateSchema.parse(conversation.draftOrder)
     : EMPTY_DRAFT_ORDER;
 
-  const message = await prisma.message.findUniqueOrThrow({ where: { id: params.messageId } });
-
   // Bug real: un pedido anterior abandonado sin confirmar (bloqueado, o
   // simplemente sin cerrar) dejaba sus ítems/domicilio/pago en el borrador
   // — si el cliente después arrancaba un pedido totalmente nuevo, esos
@@ -146,35 +178,13 @@ async function processInboundMessageLocked(params: { conversationId: string; mes
   // absoluto: el nombre del pedido es SIEMPRE el que el cliente escribe en
   // la conversación, sin ningún atajo.
 
-  // 2. Comprobante de un pedido en curso: si hay un pedido "esperando
-  // comprobante" y este mensaje es una imagen/documento, se adjunta directo
-  // (spec §3.4) sin pasar por la IA.
+  // 2. Comprobante de un pedido en curso, TODAVÍA sin confirmar: si el
+  // pedido en curso ya está completo y eligió transferencia, mandar la foto
+  // cuenta como confirmación implícita (ver más abajo). El caso de un
+  // pedido YA confirmado esperando comprobante se maneja arriba, antes del
+  // chequeo de IA pausada — acá solo queda este caso, que sí depende de la
+  // IA (arma y confirma el pedido).
   if (message.direction === "INBOUND" && (message.messageType === "IMAGE" || message.messageType === "DOCUMENT") && message.mediaUrl) {
-    // Bug real reportado: si el local le pedía al cliente que volviera a
-    // mandar el comprobante (ej. no se veía bien, o directamente se lo
-    // pidieron de nuevo desde la conversación), el segundo archivo nunca se
-    // adjuntaba — el filtro "receiptUrl: null" solo dejaba pasar el
-    // PRIMERO. Ahora cualquier imagen/documento mientras el pedido siga
-    // "esperando comprobante" pisa el anterior: el que queda en el pedido
-    // (tablero y detalle) es siempre el último que mandó el cliente.
-    const waitingOrder = await prisma.order.findFirst({
-      where: { branchId: conversation.branchId, customerPhone: conversation.customerPhone, status: "WAITING_RECEIPT" },
-      orderBy: { createdAt: "desc" },
-    });
-    if (waitingOrder) {
-      const isResend = waitingOrder.receiptUrl !== null;
-      await prisma.order.update({
-        where: { id: waitingOrder.id },
-        data: { receiptUrl: message.mediaUrl, receiptReceivedAt: new Date() },
-      });
-      await sendText(
-        isResend
-          ? "¡Recibimos el comprobante actualizado! Ya lo estamos revisando."
-          : "¡Recibimos tu comprobante! Ya lo estamos verificando y en breve pasa a preparación.",
-      );
-      return;
-    }
-
     // Todavía no hay un pedido esperando comprobante — pero si el pedido en
     // curso ya está completo, eligió transferencia, y sólo falta la
     // confirmación explícita, mandar la foto DESPUÉS de que le dimos los
