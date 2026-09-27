@@ -82,7 +82,7 @@ export function buildOrderConfirmedMessage(params: {
     );
   }
   if (params.paymentMethod === "TRANSFER") {
-    lines.push("Quedamos esperando tu comprobante de transferencia para empezar a preparar tu pedido.");
+    lines.push("Cuando hagas la transferencia, mandanos por acá la foto o el PDF del comprobante para empezar a preparar tu pedido.");
   }
   lines.push(`Demora estimada: ${params.estimatedDeliveryMinutes} minutos.`);
   return lines.join("\n");

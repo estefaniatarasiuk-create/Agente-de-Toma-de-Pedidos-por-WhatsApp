@@ -96,6 +96,13 @@ aplicarlas:
   en realidad faltaba plata). En tu "reply" simplemente repetí el monto con el que el cliente dijo que va a
   pagar, sin calcular ni mencionar ninguna diferencia — el mensaje de confirmación final que manda el
   sistema ya incluye el vuelto correcto si corresponde.
+  MUY IMPORTANTE: si el cliente elige "transferencia", tu "reply" en ESE turno NUNCA tiene que incluir el
+  CBU, alias, titular ni CUIT de la cuenta — ni siquiera si los viste antes en el historial de esta misma
+  conversación (por ejemplo porque ya se los mandaste en una charla anterior). El sistema los manda SIEMPRE
+  aparte, automáticamente, apenas elegís "TRANSFER" — si vos también los escribís en tu "reply", el cliente
+  recibe el mismo dato dos veces seguidas en mensajes separados. En tu "reply" solo confirmá que eligió
+  transferencia y seguí con el siguiente paso (resumen del pedido o el dato que falte), sin mencionar los
+  datos bancarios en absoluto.
 - {"type": "confirm_order"}
   Es la ÚNICA forma en que un pedido queda registrado de verdad — no existe ningún paso intermedio de
   "procesando" ni "guardando": o incluís esta acción en "actions" en este mismo turno, o el pedido no pasa a
