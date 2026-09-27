@@ -13,6 +13,7 @@ import { draftOrderStateSchema, llmTurnResponseSchema, EMPTY_DRAFT_ORDER } from 
 import { buildRequiresHumanMessage } from "@/lib/orders/messages";
 import { scheduleConversationExpiry } from "@/lib/jobs/queues";
 import { computeCurrentStep, isNewOrderIntentText } from "@/lib/orders/draft-step";
+import { findReusableReceiptMediaUrl } from "@/lib/orders/receipt-reuse";
 import { withConversationLock } from "@/lib/orders/conversation-lock";
 import type { Message } from "@prisma/client";
 
@@ -312,33 +313,22 @@ async function processInboundMessageLocked(params: { conversationId: string; mes
   // queda guardado en la conversación pero en ese momento todavía no existe
   // ningún pedido al que adjuntarlo — así que el mensaje de "pedido
   // confirmado" (arriba, en "extras") le pedía el comprobante de nuevo
-  // aunque ya lo hubiera mandado. Acá, apenas se crea el pedido por
-  // transferencia, se busca la última imagen/documento entrante de esta
-  // conversación (de los últimos 30 minutos, y que no esté ya adjuntada a
-  // otro pedido) y se adjunta directo, avisándole que ya la recibimos.
+  // aunque ya lo hubiera mandado. findReusableReceiptMediaUrl nunca
+  // reutiliza un archivo que ya sea el comprobante de OTRO pedido (ver ese
+  // archivo y sus tests): si el cliente hace dos pedidos en poco tiempo y
+  // solo mandó comprobante para el primero, el segundo sigue pidiendo el
+  // suyo propio, como corresponde.
   if (orderCreated && orderId && draft.paymentMethod === "TRANSFER") {
-    const RECENT_RECEIPT_WINDOW_MINUTES = 30;
-    const recentReceiptMessage = await prisma.message.findFirst({
-      where: {
-        conversationId: conversation.id,
-        direction: "INBOUND",
-        messageType: { in: ["IMAGE", "DOCUMENT"] },
-        mediaUrl: { not: null },
-        createdAt: { gte: new Date(Date.now() - RECENT_RECEIPT_WINDOW_MINUTES * 60_000) },
-      },
-      orderBy: { createdAt: "desc" },
+    const reusableMediaUrl = await findReusableReceiptMediaUrl({
+      conversationId: conversation.id,
+      branchId: conversation.branchId,
     });
-    if (recentReceiptMessage?.mediaUrl) {
-      const alreadyUsedElsewhere = await prisma.order.findFirst({
-        where: { branchId: conversation.branchId, receiptUrl: recentReceiptMessage.mediaUrl },
+    if (reusableMediaUrl) {
+      await prisma.order.update({
+        where: { id: orderId },
+        data: { receiptUrl: reusableMediaUrl, receiptReceivedAt: new Date() },
       });
-      if (!alreadyUsedElsewhere) {
-        await prisma.order.update({
-          where: { id: orderId },
-          data: { receiptUrl: recentReceiptMessage.mediaUrl, receiptReceivedAt: new Date() },
-        });
-        await sendText("¡Ah, veo que ya nos habías mandado el comprobante! Ya lo estamos revisando.");
-      }
+      await sendText("¡Ah, veo que ya nos habías mandado el comprobante! Ya lo estamos revisando.");
     }
   }
 
