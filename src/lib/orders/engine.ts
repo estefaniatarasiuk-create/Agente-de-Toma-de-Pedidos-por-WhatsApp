@@ -296,27 +296,55 @@ async function processInboundMessageLocked(params: { conversationId: string; mes
     .reverse()
     .map((m) => ({ role: m.direction === "INBOUND" ? "user" : "assistant", text: messageToHistoryText(m) }) as LlmMessage);
 
-  let parsedResponse;
-  try {
-    const result = await runAiTask({
-      purpose: "ORDER_CONVERSATION",
-      companyId: conversation.companyId,
-      branchId: conversation.branchId,
-      conversationId: conversation.id,
-      system,
-      messages: llmMessages,
-      maxTokens: 1000,
-      jsonMode: true,
-    });
-    parsedResponse = llmTurnResponseSchema.parse(JSON.parse(extractJsonBlock(result.text)));
-  } catch (error) {
-    console.error("La IA no pudo interpretar el mensaje, derivando a atención humana:", error);
-    // Se limpia el borrador al derivar (ver comentario más abajo, en el otro
-    // punto donde se deriva a atención humana): así ningún dato a medio
-    // terminar queda flotando por si la conversación se reactiva después.
+  // Bug real reportado: el cliente ya tenía una Pizza agregada sin ningún
+  // problema, pidió "una coca" a continuación, y la conversación escaló
+  // directo a atención humana — un solo fallo puntual al interpretar la
+  // respuesta de la IA (una respuesta mal formada, un corte de red, un
+  // JSON que no pasó la validación) bastaba para terminar la automatización
+  // de ese turno sin ningún reintento. Dado que estas fallas suelen ser
+  // transitorias (el modelo es no determinístico: una segunda llamada casi
+  // siempre da una respuesta válida), reintentar una vez antes de rendirse
+  // evita escalar por un hipo pasajero.
+  const MAX_LLM_ATTEMPTS = 2;
+  let parsedResponse: ReturnType<typeof llmTurnResponseSchema.parse> | undefined;
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= MAX_LLM_ATTEMPTS; attempt++) {
+    try {
+      const result = await runAiTask({
+        purpose: "ORDER_CONVERSATION",
+        companyId: conversation.companyId,
+        branchId: conversation.branchId,
+        conversationId: conversation.id,
+        system,
+        messages: llmMessages,
+        maxTokens: 1500,
+        jsonMode: true,
+      });
+      parsedResponse = llmTurnResponseSchema.parse(JSON.parse(extractJsonBlock(result.text)));
+      break;
+    } catch (error) {
+      lastError = error;
+      console.error(`La IA no pudo interpretar el mensaje (intento ${attempt}/${MAX_LLM_ATTEMPTS}):`, error);
+    }
+  }
+  if (!parsedResponse) {
+    console.error("La IA no pudo interpretar el mensaje tras reintentar, derivando a atención humana:", lastError);
+    // A diferencia de antes, el borrador NO se vacía acá: si el cliente ya
+    // había agregado productos válidos en turnos anteriores de ESTE mismo
+    // pedido (como en el caso real — una Pizza ya confirmada antes de que
+    // "una coca" hiciera fallar este turno puntual), esos datos siguen
+    // siendo reales y la persona que atienda la derivación los necesita
+    // para completar el pedido, no para arrancar de cero. El vaciado por
+    // "nuevo pedido" o por reactivación de la IA sigue intacto en los
+    // demás lugares (ver shouldClearDraftOnHandoverToAI).
     await prisma.conversation.update({
       where: { id: conversation.id },
-      data: { status: "REQUIRES_ATTENTION", draftOrder: { items: [] }, draftOrderUpdatedAt: new Date(), currentStep: null },
+      data: {
+        status: "REQUIRES_ATTENTION",
+        draftOrder: draft as unknown as object,
+        draftOrderUpdatedAt: new Date(),
+        currentStep: computeCurrentStep(draft),
+      },
     });
     await sendText(buildRequiresHumanMessage());
     return;
