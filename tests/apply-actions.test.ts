@@ -2,6 +2,7 @@ import { describe, it, expect, afterAll, vi } from "vitest";
 import { prisma } from "@/lib/prisma";
 import { applyActions } from "@/lib/orders/apply-actions";
 import { EMPTY_DRAFT_ORDER } from "@/lib/validations/order-engine";
+import { formatCentsAsArs } from "@/lib/money";
 import { createTestCompanyAndBranch, cleanupCompany } from "./fixtures";
 
 vi.mock("@/lib/geocoding", async (importOriginal) => {
@@ -1023,10 +1024,66 @@ describe("applyActions — deriva a un humano en vez de duplicar el pedido si el
     // El borrador con la Coca NO se limpia — es justo lo que el panel
     // necesita mostrar para que el personal lo sume al pedido de Chipa.
     expect(result.draft.items).toEqual(draft.items);
+    // Pedido explícito del usuario: el aviso de derivación tiene que
+    // mostrar el total combinado (pedido activo $3.000 + lo nuevo $2.800)
+    // y, como el pedido activo es en efectivo, volver a pedir con cuánto
+    // paga en total para poder calcular bien el vuelto.
+    expect(result.correctionNotes.some((note) => note.includes(formatCentsAsArs(580000)))).toBe(true);
+    expect(result.correctionNotes.some((note) => note.includes("con cuánto vas a pagar en total"))).toBe(true);
 
     const orders = await prisma.order.findMany({ where: { branchId: branch.id, customerPhone: "5491100000020" } });
     expect(orders).toHaveLength(1);
     expect(orders[0].status).toBe("PENDING");
+  });
+
+  it("no pide reconfirmar el efectivo si el pedido activo es por transferencia", async () => {
+    const { company, branch } = await createTestCompanyAndBranch();
+    companiesToCleanup.push(company.id);
+    const chipa = await prisma.product.create({
+      data: { companyId: company.id, branchId: branch.id, name: "Chipa", priceCents: 300000 },
+    });
+    const coca = await prisma.product.create({
+      data: { companyId: company.id, branchId: branch.id, name: "Coca Cola 1.5L", priceCents: 280000 },
+    });
+    await prisma.paymentMethodConfig.create({
+      data: { companyId: company.id, branchId: branch.id, cashEnabled: true, transferEnabled: true },
+    });
+    const conversation = await prisma.conversation.create({
+      data: { companyId: company.id, branchId: branch.id, customerPhone: "5491100000045" },
+    });
+    const activeOrder = await createActiveOrder({
+      companyId: company.id,
+      branchId: branch.id,
+      conversationId: conversation.id,
+      customerPhone: "5491100000045",
+      productId: chipa.id,
+      productName: chipa.name,
+      unitPriceCents: chipa.priceCents,
+    });
+    await prisma.order.update({ where: { id: activeOrder.id }, data: { paymentMethod: "TRANSFER" } });
+
+    const draft = {
+      items: [{ productId: coca.id, productName: coca.name, unitPriceCents: coca.priceCents, quantity: 1 }],
+      customerName: "Cliente Test",
+      deliveryAddressRaw: "Calle Falsa 123",
+      deliveryLatitude: -34.6,
+      deliveryLongitude: -58.38,
+      paymentMethod: "TRANSFER" as const,
+    };
+
+    const result = await applyActions({
+      companyId: company.id,
+      branchId: branch.id,
+      conversationId: conversation.id,
+      customerPhone: "5491100000045",
+      draft,
+      actions: [{ type: "confirm_order" }],
+      customerMessageText: "confirmo",
+    });
+
+    expect(result.requiresHuman).toBe(true);
+    expect(result.correctionNotes.some((note) => note.includes(formatCentsAsArs(580000)))).toBe(true);
+    expect(result.correctionNotes.some((note) => note.includes("con cuánto vas a pagar en total"))).toBe(false);
   });
 
   it("no deriva si es una corrección del mismo pedido (mismos ítems) — sigue el merge silencioso normal", async () => {

@@ -4,6 +4,7 @@ import type { LlmAction, DraftOrderState } from "@/lib/validations/order-engine"
 import { findProductMatch, findSimilarProducts } from "@/lib/orders/catalog-matching";
 import { validateDeliveryAddress } from "@/lib/orders/zone-validation";
 import { distanceKm } from "@/lib/geocoding";
+import { formatCentsAsArs } from "@/lib/money";
 import { parsePriceToCents } from "@/lib/validations/product";
 import { createOrderFromDraft, haveSameItems } from "@/lib/orders/create-order";
 import { computeCurrentStep, getMissingOrderFields, looksLikeConfirmationText, MISSING_FIELD_LABEL } from "@/lib/orders/draft-step";
@@ -352,8 +353,23 @@ export async function applyActions(params: {
         include: { items: true },
       });
       if (activeOrder && !haveSameItems(activeOrder.items, draft.items)) {
+        // Pedido explícito del usuario: avisar solo "le aviso a alguien del
+        // local" no le dice al cliente cuánto va a terminar pagando en
+        // total (el pedido activo + lo nuevo) — y si paga en efectivo, el
+        // monto que había dado en el pedido original quedó calculado sobre
+        // un total que ya no es el real, así que el vuelto que se le
+        // prometió puede quedar mal. Se lo avisamos acá mismo, en el mismo
+        // mensaje de derivación (el merge real lo hace una persona desde el
+        // panel, pero el cliente no tiene por qué esperar a eso para saber
+        // el total y que le vuelvan a preguntar el efectivo).
+        const newItemsTotalCents = draft.items.reduce((sum, item) => sum + item.unitPriceCents * item.quantity, 0);
+        const combinedTotalCents = activeOrder.totalCents + newItemsTotalCents;
+        const cashReconfirmNote =
+          activeOrder.paymentMethod === "CASH"
+            ? ` Contame también con cuánto vas a pagar en total para calcular bien el vuelto.`
+            : "";
         correctionNotes.push(
-          "Veo que ya tenés un pedido en curso — le aviso a alguien del local para que te sume esto ahí. En breve te confirman.",
+          `Veo que ya tenés un pedido en curso — le aviso a alguien del local para que te sume esto ahí. Con lo nuevo, el total sería ${formatCentsAsArs(combinedTotalCents)}.${cashReconfirmNote} En breve te confirman.`,
         );
         return {
           draft,

@@ -26,10 +26,20 @@ const EDITABLE_STATUSES: OrderStatus[] = ["WAITING_RECEIPT", "PENDING", "PREPARI
 // El borrador de la conversación (JSON) puede traer productos que el
 // cliente pidió por WhatsApp mientras este pedido seguía activo — ver el
 // chequeo en apply-actions.ts, que a propósito NO limpia el borrador en ese
-// caso puntual para que el panel pueda mostrarlo acá.
-function getPendingDraftItems(order: OrderDetail): Array<{ productId: string; productName: string; quantity: number }> {
+// caso puntual para que el panel pueda mostrarlo acá. El borrador ya trae
+// "unitPriceCents" (lo captura el motor de conversación al agregar cada
+// ítem) — usar ESE precio acá, nunca el del catálogo actual: antes se
+// buscaba en el catálogo cargado en pantalla (loadProducts), pero esa carga
+// es asíncrona y recién se dispara AL ABRIR el editor de ítems, después de
+// armar la lista — el catálogo todavía estaba vacío en ese momento y los
+// productos nuevos se sumaban con precio $0 (bug real reportado).
+function getPendingDraftItems(
+  order: OrderDetail,
+): Array<{ productId: string; productName: string; unitPriceCents: number; quantity: number }> {
   if (order.conversation?.status !== "REQUIRES_ATTENTION") return [];
-  const draft = order.conversation.draftOrder as { items?: Array<{ productId: string; productName: string; quantity: number }> } | null;
+  const draft = order.conversation.draftOrder as {
+    items?: Array<{ productId: string; productName: string; unitPriceCents: number; quantity: number }>;
+  } | null;
   return draft?.items ?? [];
 }
 
@@ -146,11 +156,10 @@ export function OrderDetailPanel({
       const existing = merged.find((item) => item.productId === pendingItem.productId);
       if (existing) existing.quantity += pendingItem.quantity;
       else {
-        const product = products?.find((p) => p.id === pendingItem.productId);
         merged.push({
           productId: pendingItem.productId,
           productName: pendingItem.productName,
-          unitPriceCents: product?.priceCents ?? 0,
+          unitPriceCents: pendingItem.unitPriceCents,
           quantity: pendingItem.quantity,
         });
       }
