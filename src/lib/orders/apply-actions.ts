@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import type { PaymentMethodConfig } from "@prisma/client";
 import type { LlmAction, DraftOrderState } from "@/lib/validations/order-engine";
 import { findProductMatch, findSimilarProducts } from "@/lib/orders/catalog-matching";
 import { validateDeliveryAddress } from "@/lib/orders/zone-validation";
@@ -83,6 +84,18 @@ export async function applyActions(params: {
   // Exigir un mensaje aparte para confirmar es más seguro que confiar en
   // que el modelo distinga "cliente confirma" de "cliente completa un dato".
   const wasReadyToConfirmBeforeThisTurn = computeCurrentStep(params.draft) === "CONFIRMING";
+  // Bug real reportado: los datos bancarios se mandaban apenas se procesaba
+  // set_payment_method con TRANSFER, sin importar si otra cosa del MISMO
+  // turno todavía tenía un problema sin resolver (ej. la IA reconfirmó el
+  // medio de pago justo cuando la dirección necesitaba una corrección) — el
+  // cliente recibía el CBU en medio de un problema pendiente, fuera de
+  // lugar. También se repetían cada vez que la IA "restataba" el medio de
+  // pago en un turno posterior, aunque ya se hubieran mandado antes. Se
+  // guarda acá (en vez de mandarlos al toque dentro del loop) para recién
+  // decidir DESPUÉS de procesar todas las acciones del turno: solo se
+  // mandan si el cliente de verdad está eligiendo transferencia por primera
+  // vez Y no quedó ningún otro problema sin resolver en este mismo turno.
+  let paymentConfigForNewTransfer: PaymentMethodConfig | null = null;
 
   // Si el cliente pide hablar con una persona, eso manda por sobre
   // cualquier otra cosa que la IA haya intentado hacer en el mismo turno.
@@ -242,6 +255,12 @@ export async function applyActions(params: {
         correctionNotes.push(`Ese medio de pago no está disponible acá. Contame cómo vas a pagar de las opciones que te ofrecimos.`);
         continue;
       }
+      // Capturado ANTES de pisar draft.paymentMethod: distingue "el cliente
+      // recién ahora eligió transferencia" de "la IA volvió a mandar la
+      // misma acción restatando el pedido" — solo en el primer caso
+      // corresponde (ver el bloque después del loop) mandar los datos
+      // bancarios.
+      const isNewTransferSelection = action.method === "TRANSFER" && draft.paymentMethod !== "TRANSFER";
       if (action.method !== draft.paymentMethod) draftChangedThisTurn = true;
       draft.paymentMethod = action.method;
       if (action.method === "CASH" && action.cashAmount !== undefined) {
@@ -251,8 +270,8 @@ export async function applyActions(params: {
           draftChangedThisTurn = true;
         }
       }
-      if (action.method === "TRANSFER" && paymentConfig) {
-        extras.push({ kind: "text", text: buildPaymentInfoMessage(paymentConfig) });
+      if (isNewTransferSelection && paymentConfig) {
+        paymentConfigForNewTransfer = paymentConfig;
       }
       continue;
     }
@@ -381,6 +400,14 @@ export async function applyActions(params: {
       extras.push({ kind: "catalog_image" });
       continue;
     }
+  }
+
+  // Recién ACÁ, con todas las acciones del turno ya procesadas, se decide
+  // si corresponde mandar los datos bancarios — nunca si quedó algo más sin
+  // resolver en este mismo turno (ver la nota junto a
+  // paymentConfigForNewTransfer, más arriba).
+  if (paymentConfigForNewTransfer && correctionNotes.length === 0) {
+    extras.push({ kind: "text", text: buildPaymentInfoMessage(paymentConfigForNewTransfer) });
   }
 
   // Si el cliente hizo un cambio real sin intentar confirmar en el mismo

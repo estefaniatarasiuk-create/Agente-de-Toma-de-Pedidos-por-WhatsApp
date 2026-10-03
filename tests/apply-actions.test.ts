@@ -1070,3 +1070,154 @@ describe("applyActions — deriva a un humano en vez de duplicar el pedido si el
     expect(orders[0].cashPaymentAmountCents).toBe(2000000);
   });
 });
+
+// Regresión de un bug real reportado: el cliente eligió transferencia justo
+// en el mismo mensaje en el que la dirección que dio necesitaba una
+// corrección ("Barbieri y Namuncurá") — el sistema le mandó los datos
+// bancarios de una y le preguntó por la dirección en otro mensaje aparte, en
+// vez de resolver primero el problema pendiente y recién después hablar de
+// pago. También se reportó que, al confirmar la dirección sugerida en el
+// turno siguiente (donde la IA reemite set_payment_method con TRANSFER
+// porque ya estaba establecido), los datos bancarios se repetían de nuevo.
+describe("applyActions — no manda los datos bancarios si queda un problema sin resolver en el mismo turno", () => {
+  const companiesToCleanup: string[] = [];
+
+  afterAll(async () => {
+    for (const companyId of companiesToCleanup) await cleanupCompany(companyId);
+  });
+
+  it("no incluye los datos bancarios si la dirección del mismo turno necesita una corrección", async () => {
+    const { company, branch } = await createTestCompanyAndBranch();
+    companiesToCleanup.push(company.id);
+    await prisma.deliveryZone.create({
+      data: { companyId: company.id, branchId: branch.id, centerLatitude: -34.6083, centerLongitude: -58.3712, radiusKm: 5 },
+    });
+    const product = await prisma.product.create({
+      data: { companyId: company.id, branchId: branch.id, name: "Chipa", priceCents: 300000 },
+    });
+    await prisma.paymentMethodConfig.create({
+      data: {
+        companyId: company.id,
+        branchId: branch.id,
+        cashEnabled: true,
+        transferEnabled: true,
+        transferAlias: "negocio.mp",
+        transferCbu: "0000000000000000000000",
+        transferHolder: "Negocio SA",
+      },
+    });
+    const conversation = await prisma.conversation.create({
+      data: { companyId: company.id, branchId: branch.id, customerPhone: "5491100000040" },
+    });
+
+    // Misma mecánica que el test de "propone una corrección de domicilio":
+    // primera pasada resuelve lejos, el reintento restringido a la
+    // localidad resuelve cerca, dentro de zona.
+    geocodeAddressMock.mockResolvedValueOnce({
+      latitude: -31.4201,
+      longitude: -64.1888,
+      formattedAddress: "Barbieri, Córdoba, Argentina",
+      partialMatch: false,
+      isPreciseMatch: true,
+      fromCache: false,
+    });
+    reverseGeocodeLocalityMock.mockResolvedValueOnce("Villa Centenario");
+    geocodeAddressMock.mockResolvedValueOnce({
+      latitude: -34.61,
+      longitude: -58.3745,
+      formattedAddress: "Barbieri y Namuncurá, Villa Centenario, Argentina",
+      partialMatch: false,
+      isPreciseMatch: true,
+      fromCache: false,
+    });
+
+    const draft = {
+      items: [{ productId: product.id, productName: product.name, unitPriceCents: product.priceCents, quantity: 2 }],
+      customerName: "Cliente Test",
+    };
+
+    const result = await applyActions({
+      companyId: company.id,
+      branchId: branch.id,
+      conversationId: conversation.id,
+      customerPhone: "5491100000040",
+      draft,
+      actions: [
+        { type: "set_customer_info", address: "Barbieri y Namuncurá" },
+        { type: "set_payment_method", method: "TRANSFER" },
+      ],
+    });
+
+    expect(result.draft.pendingAddressSuggestion).toBeDefined();
+    expect(result.correctionNotes.some((note) => note.includes("No encontré esa dirección tal cual"))).toBe(true);
+    expect(result.draft.paymentMethod).toBe("TRANSFER");
+    const sentBankDetails = result.extras.some(
+      (extra) => extra.kind === "text" && extra.text.includes("estos son los datos de la cuenta"),
+    );
+    expect(sentBankDetails).toBe(false);
+  });
+
+  it("manda los datos bancarios una sola vez: no se repiten cuando el turno siguiente reconfirma la dirección y reemite TRANSFER sin ningún otro problema", async () => {
+    const { company, branch } = await createTestCompanyAndBranch();
+    companiesToCleanup.push(company.id);
+    await prisma.deliveryZone.create({
+      data: { companyId: company.id, branchId: branch.id, centerLatitude: -34.6083, centerLongitude: -58.3712, radiusKm: 5 },
+    });
+    const product = await prisma.product.create({
+      data: { companyId: company.id, branchId: branch.id, name: "Chipa", priceCents: 300000 },
+    });
+    await prisma.paymentMethodConfig.create({
+      data: {
+        companyId: company.id,
+        branchId: branch.id,
+        cashEnabled: true,
+        transferEnabled: true,
+        transferAlias: "negocio.mp",
+        transferCbu: "0000000000000000000000",
+        transferHolder: "Negocio SA",
+      },
+    });
+    const conversation = await prisma.conversation.create({
+      data: { companyId: company.id, branchId: branch.id, customerPhone: "5491100000041" },
+    });
+
+    const draftFirstTurn = {
+      items: [{ productId: product.id, productName: product.name, unitPriceCents: product.priceCents, quantity: 2 }],
+      customerName: "Cliente Test",
+      deliveryAddressRaw: "Calle Falsa 123",
+      deliveryLatitude: -34.6,
+      deliveryLongitude: -58.38,
+    };
+
+    // Primer turno: elige transferencia por primera vez, sin ningún otro
+    // problema pendiente — acá SÍ tiene que mandar los datos bancarios.
+    const first = await applyActions({
+      companyId: company.id,
+      branchId: branch.id,
+      conversationId: conversation.id,
+      customerPhone: "5491100000041",
+      draft: draftFirstTurn,
+      actions: [{ type: "set_payment_method", method: "TRANSFER" }],
+    });
+    expect(first.draft.paymentMethod).toBe("TRANSFER");
+    expect(
+      first.extras.some((extra) => extra.kind === "text" && extra.text.includes("estos son los datos de la cuenta")),
+    ).toBe(true);
+
+    // Segundo turno: la IA reemite set_payment_method con TRANSFER (ya
+    // establecido desde el turno anterior) junto con la confirmación —
+    // no tiene que volver a mandar los datos bancarios.
+    const second = await applyActions({
+      companyId: company.id,
+      branchId: branch.id,
+      conversationId: conversation.id,
+      customerPhone: "5491100000041",
+      draft: first.draft,
+      actions: [{ type: "set_payment_method", method: "TRANSFER" }, { type: "confirm_order" }],
+      customerMessageText: "sisi, confirmo",
+    });
+    expect(
+      second.extras.some((extra) => extra.kind === "text" && extra.text.includes("estos son los datos de la cuenta")),
+    ).toBe(false);
+  });
+});
