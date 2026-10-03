@@ -303,8 +303,20 @@ async function processInboundMessageLocked(params: { conversationId: string; mes
     return;
   }
 
+  // Bug real reportado: cuando confirm_order se aplica con éxito en este
+  // mismo turno, el "reply" de la IA solía seguir sonando a "¿confirmás
+  // este pedido?" (a veces repitiendo todo el resumen) — un resabio de que
+  // armó esa frase sin darse cuenta de que YA estaba incluyendo
+  // confirm_order en el mismo turno. Mandarlo igual, seguido del mensaje
+  // real de "¡Pedido confirmado!" (en "extras"), es confuso: el cliente ve
+  // que le preguntan si confirma justo después de que el sistema le dice
+  // que ya se confirmó solo. El mensaje generado en código ya es la única
+  // fuente de verdad acá, así que el "reply" de la IA se descarta entero
+  // en este caso — no hay nada útil que pueda agregar.
   const replyText = correctionNotes.length > 0 ? correctionNotes.join("\n\n") : parsedResponse.reply;
-  await sendText(replyText);
+  if (!orderCreated) {
+    await sendText(replyText);
+  }
   await sendExtras(extras);
 
   // Bug real reportado: si el cliente manda el comprobante ANTES de escribir

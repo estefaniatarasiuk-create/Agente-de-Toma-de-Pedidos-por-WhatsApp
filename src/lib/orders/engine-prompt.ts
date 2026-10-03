@@ -20,6 +20,15 @@ async function buildActiveOrderStatusText(branchId: string, customerPhone: strin
   if (order.status === "ON_THE_WAY") {
     return "Tiene un pedido en curso que ya salió y está en camino.";
   }
+  // Pedido explícito del usuario: "pendiente" (recién confirmado, nadie del
+  // local lo empezó a preparar todavía) no es lo mismo que "en preparación"
+  // (la cocina ya está trabajando en él) — decirle al cliente que "está en
+  // preparación" cuando en realidad el local ni lo vio todavía es
+  // información falsa, y además da a entender que agregar algo es más
+  // difícil de lo que en los hechos es en ese estado.
+  if (order.status === "PENDING") {
+    return "Tiene un pedido en curso, recién confirmado — todavía no lo empezamos a preparar.";
+  }
 
   const now = new Date();
   if (now < order.estimatedDeliveryAt) {
@@ -162,7 +171,21 @@ tener el actual, pero tampoco te quedes callada esperando: siempre proponé qué
 MUY IMPORTANTE: nunca le muestres al cliente un "resumen" del pedido pidiéndole que confirme si en "Estado
 actual del pedido" de abajo todavía falta el nombre, el domicilio, o el medio de pago — eso lo confunde
 (le hace pensar que ya está todo listo cuando en realidad falta algo). Revisá siempre esa sección antes de
-armar un resumen: si falta algo, pedíselo primero.`;
+armar un resumen: si falta algo, pedíselo primero.
+MUY IMPORTANTE (caso real donde sonó a robot, no a una persona atendiendo): el historial de mensajes de
+abajo puede incluir turnos de un pedido ANTERIOR de este mismo cliente, ya confirmado y cerrado (mismo
+número de WhatsApp, pudo haber pedido hace un rato o hace varios días). NUNCA uses el nombre, el domicilio
+ni el medio de pago de un pedido anterior para el pedido ACTUAL, ni saludes usando un nombre que viste ahí
+— aunque en los hechos lo "sepas" por el historial, para EL PEDIDO QUE ESTÁS ARMANDO AHORA esos datos NO
+están confirmados todavía. La única fuente de verdad sobre lo que ya tenés de ESTE pedido es la sección
+"Estado actual del pedido" de abajo: si dice "TODAVÍA NO LO DIJO", preguntáselo como si fuera la primera
+vez, sin importar si ya apareció antes en la conversación. (Si el cliente te dice "los mismos datos que la
+vez pasada" o similar, ahí sí podés usarlos — pero nunca los asumas sin que el cliente lo pida.)
+MUY IMPORTANTE (otro caso real): cuando le preguntes al cliente con cuánto efectivo va a pagar, SIEMPRE
+mencioná el total del pedido en esa MISMA pregunta (ya lo tenés en "Estado actual del pedido" de arriba,
+no hace falta recalcularlo) — por ejemplo "El total es $4.500. ¿Con cuánto vas a pagar?" en vez de solo
+"¿Con cuánto vas a pagar?". Preguntar el monto sin decir antes cuánto es obliga al cliente a preguntarlo
+aparte, y además suena mecánico — como si no supieras vos misma cuánto cobrás.`;
 
 export async function buildEngineSystemPrompt(params: {
   branchId: string;
@@ -182,7 +205,7 @@ ${draftSummary}
 Nombre del cliente: ${params.draft.customerName ? params.draft.customerName : "TODAVÍA NO LO DIJO — no armes un resumen ni pidas confirmar hasta tenerlo"}
 Domicilio de entrega: ${params.draft.deliveryAddressRaw ? `${params.draft.deliveryAddressNormalized ?? params.draft.deliveryAddressRaw}${params.draft.deliveryAddressNotes ? ` (${params.draft.deliveryAddressNotes})` : ""}` : "TODAVÍA NO LO DIJO — no armes un resumen ni pidas confirmar hasta tenerlo"}${params.draft.pendingAddressSuggestion ? `\nYa le preguntaste al cliente si su domicilio es "${params.draft.pendingAddressSuggestion.formattedAddress}" y todavía no respondió con claridad — insistí en confirmar ESA dirección puntual antes de pedirle una completamente nueva.` : ""}
 Medio de pago: ${params.draft.paymentMethod ? (params.draft.paymentMethod === "CASH" ? "efectivo" : "transferencia") : "TODAVÍA NO LO ELIGIÓ — no armes un resumen ni pidas confirmar hasta tenerlo"}
-${activeOrderText ? `\nEste cliente ya tiene un pedido en curso (independiente del que se esté armando arriba): ${activeOrderText} Si pide agregar productos, NO se pueden sumar a ese pedido (ya está en preparación o en camino, no se puede modificar) — arma un PEDIDO NUEVO Y SEPARADO con lo que pida ahora, y avisale explícitamente en tu "reply" que eso le va a llegar en una entrega aparte del pedido que ya tiene en curso. Si en cambio el cliente está corrigiendo un dato de ESE pedido (ej. "me equivoqué, son $20.000 no $20"), repetí los mismos productos, nombre y domicilio de ese pedido junto con el dato corregido y confirmá de nuevo — el sistema reconoce que es una corrección del mismo pedido y lo actualiza, en vez de duplicarlo.` : ""}`;
+${activeOrderText ? `\nEste cliente ya tiene un pedido en curso (independiente del que se esté armando arriba): ${activeOrderText} Si pide agregar productos NUEVOS (distintos a los de ese pedido), armá el pedido nuevo como siempre (add_item, etc.) con lo que pida — cuando lo confirme, el sistema se da cuenta solo de que ya tiene un pedido activo y avisa para que una persona del local decida si se lo suma al que ya tiene en curso o se lo manda aparte. MUY IMPORTANTE: en tu "reply" NUNCA le prometas que esto "va a llegar en una entrega aparte" ni que "no se puede sumar al pedido anterior" — eso no es así, lo normal es que el local SÍ se lo sume al pedido existente, y prometerle lo contrario es mentirle. Simplemente armá el pedido nuevo y avisale que en breve el local le confirma cómo queda. Si en cambio el cliente está corrigiendo un dato de ESE pedido (ej. "me equivoqué, son $20.000 no $20"), repetí los mismos productos, nombre y domicilio de ese pedido junto con el dato corregido y confirmá de nuevo — el sistema reconoce que es una corrección del mismo pedido y lo actualiza, en vez de duplicarlo.` : ""}`;
 
   return { branchName, system };
 }
