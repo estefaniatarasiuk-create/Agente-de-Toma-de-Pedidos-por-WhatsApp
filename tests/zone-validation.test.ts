@@ -110,8 +110,32 @@ describe("validateDeliveryAddress", () => {
       fromCache: false,
     });
 
+    // El texto incluye un número (ej. el cliente puso una referencia de
+    // altura vaga) para llegar hasta la geocodificación y ejercitar el
+    // chequeo basado en la respuesta de Google — el chequeo por texto (sin
+    // NINGÚN dígito) se prueba aparte, más abajo.
+    const result = await validateDeliveryAddress(branch.id, "namuncura y barbieri, cerca del 1500");
+    expect(result.status).toBe("missing_house_number");
+  });
+
+  // El otro lado del mismo chequeo: si el cliente no escribió NI UN dígito,
+  // se pide la altura sin siquiera llamar a geocodificar.
+  it("pide la altura sin geocodificar si el texto del cliente no tiene ningún dígito", async () => {
+    const { company, branch } = await createTestCompanyAndBranch();
+    companiesToCleanup.push(company.id);
+    await prisma.deliveryZone.create({
+      data: {
+        companyId: company.id,
+        branchId: branch.id,
+        centerLatitude: ZONE_CENTER.latitude,
+        centerLongitude: ZONE_CENTER.longitude,
+        radiusKm: ZONE_CENTER.radiusKm,
+      },
+    });
+
     const result = await validateDeliveryAddress(branch.id, "namuncura y barbieri");
     expect(result.status).toBe("missing_house_number");
+    expect(geocodeAddressMock).not.toHaveBeenCalled();
   });
 
   it("devuelve zone_not_configured si la sucursal no tiene zona cargada", async () => {
@@ -206,7 +230,7 @@ describe("validateDeliveryAddress", () => {
       fromCache: false,
     });
 
-    const result = await validateDeliveryAddress(branch.id, "barbieri");
+    const result = await validateDeliveryAddress(branch.id, "barbieri, cerca del 1500");
     expect(result.status).toBe("ambiguous");
   });
 
@@ -225,7 +249,7 @@ describe("validateDeliveryAddress", () => {
 
     geocodeAddressMock.mockResolvedValueOnce(null);
 
-    const result = await validateDeliveryAddress(branch.id, "asdkjasdkj no existe");
+    const result = await validateDeliveryAddress(branch.id, "asdkjasdkj 123 no existe");
     expect(result.status).toBe("ambiguous");
   });
 });

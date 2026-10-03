@@ -32,6 +32,19 @@ export async function validateDeliveryAddress(
   const zone = await prisma.deliveryZone.findUnique({ where: { branchId } });
   if (!zone) return { status: "zone_not_configured" };
 
+  // Bug real reportado: aunque el cliente nunca escribió ningún número de
+  // puerta ("Barbieri y Namuncura", solo el cruce de calles), Google a
+  // veces igual devuelve una coincidencia "precisa" con street_number (por
+  // ejemplo, interpola una altura aproximada para el cruce) — no podemos
+  // confiar solo en lo que clasifique Google acá, es la MISMA razón por la
+  // que se agregó el chequeo de "hasStreetNumber" en geocoding.ts, pero
+  // ese depende de la respuesta de un tercero. Si el texto que escribió el
+  // cliente no tiene NI UN dígito, sabemos con certeza, sin necesidad de
+  // geocodificar nada, que no dio ninguna altura.
+  if (!/\d/.test(rawAddress)) {
+    return { status: "missing_house_number" };
+  }
+
   // No podemos permitir que un error acá (ej. falta la API key, corte de
   // red, la cuota de Google se agotó) tire abajo todo el procesamiento del
   // webhook en silencio — el cliente tiene que enterarse igual de que algo

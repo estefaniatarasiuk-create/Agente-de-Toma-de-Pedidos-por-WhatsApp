@@ -7,7 +7,13 @@ import { distanceKm } from "@/lib/geocoding";
 import { formatCentsAsArs } from "@/lib/money";
 import { parsePriceToCents } from "@/lib/validations/product";
 import { createOrderFromDraft, haveSameItems } from "@/lib/orders/create-order";
-import { computeCurrentStep, getMissingOrderFields, looksLikeConfirmationText, MISSING_FIELD_LABEL } from "@/lib/orders/draft-step";
+import {
+  computeCurrentStep,
+  computeDraftItemsTotalCents,
+  getMissingOrderFields,
+  looksLikeConfirmationText,
+  MISSING_FIELD_LABEL,
+} from "@/lib/orders/draft-step";
 import {
   buildAmbiguousAddressMessage,
   buildFullOrderSummary,
@@ -313,11 +319,22 @@ export async function applyActions(params: {
           // saber qué falta de verdad. Si hay campos faltantes, se los
           // decimos explícitamente en vez del mensaje genérico.
           const missing = getMissingOrderFields(draft);
-          correctionNotes.push(
-            missing.length > 0
-              ? `Todavía me falta ${missing.map((field) => MISSING_FIELD_LABEL[field] ?? field).join(", ")} para poder confirmar el pedido.`
-              : `¡Ya tengo todos los datos de tu pedido!\n\n${buildFullOrderSummary(draft)}\n\nSi está todo bien, confirmámelo en tu próximo mensaje para registrarlo.`,
-          );
+          if (missing.length === 1 && missing[0] === "monto de efectivo suficiente") {
+            // Bug real reportado: en vez del genérico "todavía me falta el
+            // monto correcto", acá sí tenemos los números a mano — mostrar
+            // la plata real (lo que dijo vs. el total) es mucho más claro
+            // que una frase vaga.
+            const itemsTotalCents = computeDraftItemsTotalCents(draft);
+            correctionNotes.push(
+              `Dijiste que ibas a pagar con ${formatCentsAsArs(draft.cashPaymentAmountCents!)}, pero el total es ${formatCentsAsArs(itemsTotalCents)} — ese monto no alcanza. ¿Con cuánto vas a pagar en total?`,
+            );
+          } else {
+            correctionNotes.push(
+              missing.length > 0
+                ? `Todavía me falta ${missing.map((field) => MISSING_FIELD_LABEL[field] ?? field).join(", ")} para poder confirmar el pedido.`
+                : `¡Ya tengo todos los datos de tu pedido!\n\n${buildFullOrderSummary(draft)}\n\nSi está todo bien, confirmámelo en tu próximo mensaje para registrarlo.`,
+            );
+          }
         }
         continue;
       }

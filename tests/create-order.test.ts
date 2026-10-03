@@ -117,7 +117,7 @@ describe("createOrderFromDraft — no duplica un pedido reciente con los mismos 
       deliveryLatitude: -34.6,
       deliveryLongitude: -58.38,
       paymentMethod: "CASH" as const,
-      cashPaymentAmountCents: 2000, // el cliente dijo "20" queriendo decir $20.000
+      cashPaymentAmountCents: 1500000,
     };
 
     const first = await createOrderFromDraft({

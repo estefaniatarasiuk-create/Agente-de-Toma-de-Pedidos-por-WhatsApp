@@ -11,7 +11,15 @@ export const MISSING_FIELD_LABEL: Record<string, string> = {
   "domicilio validado": "tu domicilio de entrega",
   "medio de pago": "cómo vas a pagar",
   "monto de efectivo": "con cuánto efectivo vas a pagar",
+  "monto de efectivo suficiente": "el monto correcto de efectivo (lo que dijiste no alcanza para cubrir el total)",
 };
+
+// Suma de los ítems del borrador — compartida entre el chequeo de "el
+// efectivo no alcanza" de acá abajo y el mensaje específico con los montos
+// reales que arma apply-actions.ts para ese mismo caso.
+export function computeDraftItemsTotalCents(draft: DraftOrderState): number {
+  return draft.items.reduce((sum, item) => sum + item.unitPriceCents * item.quantity, 0);
+}
 
 // Misma lista de campos requeridos que usa create-order.ts para decidir si
 // un pedido está completo — centralizada acá para que apply-actions.ts
@@ -30,8 +38,22 @@ export function getMissingOrderFields(draft: DraftOrderState): string[] {
   // completo), nada bloqueaba la confirmación. El pedido quedó sin vuelto
   // calculable y sin mostrar el monto en el tablero. Exigir este dato antes
   // de poder confirmar, igual que cualquier otro dato faltante.
-  if (draft.paymentMethod === "CASH" && draft.cashPaymentAmountCents === undefined) {
-    missing.push("monto de efectivo");
+  if (draft.paymentMethod === "CASH") {
+    if (draft.cashPaymentAmountCents === undefined) {
+      missing.push("monto de efectivo");
+    } else if (draft.cashPaymentAmountCents < computeDraftItemsTotalCents(draft)) {
+      // Bug real reportado: el cliente dijo "10" (pensando en $10.000) en
+      // respuesta a "¿con cuánto vas a abonar?", la IA no lo interpretó
+      // como abreviación de miles ni preguntó para confirmar, y el pedido
+      // se confirmó igual con un monto literal de $10 — muy por debajo del
+      // total — y el cliente recién se enteró de que "faltaba plata" en el
+      // mensaje DESPUÉS de confirmar. Un monto insuficiente es, en la
+      // práctica, casi siempre este malentendido (nunca un pago parcial
+      // intencional en este negocio) — bloquear la confirmación hasta que
+      // dé un monto que alcance evita que el pedido quede mal armado desde
+      // el vamos.
+      missing.push("monto de efectivo suficiente");
+    }
   }
   return missing;
 }
@@ -78,6 +100,11 @@ export function computeCurrentStep(draft: DraftOrderState): string | null {
   }
   const missing = getMissingOrderFields(draft);
   if (missing.includes("nombre") || missing.includes("domicilio validado")) return "ASKING_DELIVERY_INFO";
-  if (missing.includes("medio de pago") || missing.includes("monto de efectivo")) return "ASKING_PAYMENT_METHOD";
+  if (
+    missing.includes("medio de pago") ||
+    missing.includes("monto de efectivo") ||
+    missing.includes("monto de efectivo suficiente")
+  )
+    return "ASKING_PAYMENT_METHOD";
   return "CONFIRMING";
 }

@@ -871,14 +871,21 @@ describe("applyActions — no confirma si el cliente no dijo nada que suene a un
 // pero el sistema nunca avisaba la diferencia real a nadie. Ahora el
 // mensaje de confirmación (el oficial, generado en código) avisa
 // explícitamente cuánto falta cobrar en vez de quedarse callado.
-describe("applyActions — avisa si el cliente paga en efectivo menos que el total", () => {
+// Regresión de un bug real reportado: el cliente respondió "10" a "¿con
+// cuánto vas a abonar?" (total $3.000) y el sistema confirmó el pedido
+// igual, avisando RECIÉN en el mensaje de confirmación final que faltaba
+// plata — demasiado tarde, el pedido ya había quedado mal armado. Pedido
+// explícito del usuario: si el efectivo declarado no alcanza, hay que
+// pedirle que ponga el valor correcto ANTES de confirmar, nunca aceptarlo
+// con un aviso después del hecho.
+describe("applyActions — no confirma un pedido en efectivo si el monto declarado no alcanza", () => {
   const companiesToCleanup: string[] = [];
 
   afterAll(async () => {
     for (const companyId of companiesToCleanup) await cleanupCompany(companyId);
   });
 
-  it("el mensaje de confirmación dice cuánto falta cobrar, no un vuelto inexistente", async () => {
+  it("bloquea confirm_order y pide el monto correcto, mostrando el total real y lo que el cliente dijo", async () => {
     const { company, branch } = await createTestCompanyAndBranch();
     companiesToCleanup.push(company.id);
     const product = await prisma.product.create({
@@ -911,11 +918,64 @@ describe("applyActions — avisa si el cliente paga en efectivo menos que el tot
       customerMessageText: "confirmo",
     });
 
+    expect(result.orderCreated).toBe(false);
+    const note = result.correctionNotes.join("\n");
+    expect(note).toContain("no alcanza");
+    expect(note).toContain(formatCentsAsArs(150000));
+    expect(note).toContain(formatCentsAsArs(280000));
+    const orders = await prisma.order.findMany({ where: { branchId: branch.id } });
+    expect(orders).toHaveLength(0);
+  });
+
+  it("confirma una vez que el cliente corrige el monto a uno que sí alcanza", async () => {
+    const { company, branch } = await createTestCompanyAndBranch();
+    companiesToCleanup.push(company.id);
+    const product = await prisma.product.create({
+      data: { companyId: company.id, branchId: branch.id, name: "Coca Cola 1.5L", priceCents: 280000 },
+    });
+    await prisma.paymentMethodConfig.create({
+      data: { companyId: company.id, branchId: branch.id, cashEnabled: true, transferEnabled: false },
+    });
+    const conversation = await prisma.conversation.create({
+      data: { companyId: company.id, branchId: branch.id, customerPhone: "5491100000046" },
+    });
+
+    const draft = {
+      items: [{ productId: product.id, productName: product.name, unitPriceCents: product.priceCents, quantity: 1 }],
+      customerName: "Cliente Test",
+      deliveryAddressRaw: "Calle Falsa 123",
+      deliveryLatitude: -34.6,
+      deliveryLongitude: -58.38,
+      paymentMethod: "CASH" as const,
+      cashPaymentAmountCents: 150000,
+    };
+
+    // El cliente se dio cuenta y corrigió ("en realidad son 5 mil") — el
+    // sistema deja confirmar sin problema una vez que el monto alcanza.
+    const corrected = await applyActions({
+      companyId: company.id,
+      branchId: branch.id,
+      conversationId: conversation.id,
+      customerPhone: "5491100000046",
+      draft,
+      actions: [{ type: "set_payment_method", method: "CASH", cashAmount: 5000 }],
+    });
+    expect(corrected.draft.cashPaymentAmountCents).toBe(500000);
+
+    const result = await applyActions({
+      companyId: company.id,
+      branchId: branch.id,
+      conversationId: conversation.id,
+      customerPhone: "5491100000046",
+      draft: corrected.draft,
+      actions: [{ type: "confirm_order" }],
+      customerMessageText: "confirmo",
+    });
+
     expect(result.orderCreated).toBe(true);
-    const confirmedText = result.extras.find((extra) => extra.kind === "text")?.text ?? "";
-    expect(confirmedText).toContain("todavía faltan");
-    expect(confirmedText).toContain("1.300,00");
-    expect(confirmedText).not.toContain("de cambio");
+    const orders = await prisma.order.findMany({ where: { branchId: branch.id, customerPhone: "5491100000046" } });
+    expect(orders).toHaveLength(1);
+    expect(orders[0].cashPaymentAmountCents).toBe(500000);
   });
 });
 
@@ -1213,8 +1273,11 @@ describe("applyActions — no manda los datos bancarios si queda un problema sin
       conversationId: conversation.id,
       customerPhone: "5491100000040",
       draft,
+      // El texto incluye un número para llegar hasta la geocodificación y
+      // ejercitar el flujo de "suggested_correction" — el chequeo de
+      // altura por texto (sin NINGÚN dígito) se prueba aparte.
       actions: [
-        { type: "set_customer_info", address: "Barbieri y Namuncurá" },
+        { type: "set_customer_info", address: "Barbieri y Namuncurá, altura 1500 aprox" },
         { type: "set_payment_method", method: "TRANSFER" },
       ],
     });
@@ -1320,16 +1383,9 @@ describe("applyActions — set_customer_info con un cruce de calles sin altura",
       data: { companyId: company.id, branchId: branch.id, customerPhone: "5491100000042" },
     });
 
-    geocodeAddressMock.mockResolvedValueOnce({
-      latitude: -34.61,
-      longitude: -58.3745,
-      formattedAddress: "Vicente Barbieri & Ceferino Namuncurá, Villa Centenario, Argentina",
-      partialMatch: false,
-      isPreciseMatch: true,
-      hasStreetNumber: false,
-      fromCache: false,
-    });
-
+    // El texto del cliente no tiene NI UN dígito — el chequeo de altura
+    // por texto (zone-validation.ts) corta antes de llamar a geocodificar,
+    // así que no hace falta mockear ninguna respuesta de Google acá.
     const draft = {
       items: [{ productId: product.id, productName: product.name, unitPriceCents: product.priceCents, quantity: 1 }],
       customerName: "Estefania",
@@ -1348,6 +1404,7 @@ describe("applyActions — set_customer_info con un cruce de calles sin altura",
     expect(result.draft.pendingAddressSuggestion).toBeUndefined();
     expect(result.correctionNotes.some((note) => note.includes("me falta la altura"))).toBe(true);
     expect(result.orderCreated).toBe(false);
+    expect(geocodeAddressMock).not.toHaveBeenCalled();
   });
 });
 

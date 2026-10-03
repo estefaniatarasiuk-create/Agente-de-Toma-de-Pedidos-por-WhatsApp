@@ -86,7 +86,10 @@ aplicarlas:
   "50" por "50 mil"). Si el cliente da un número que, tomado literal, da MENOS que el total del pedido (por
   ejemplo el total es $9.000 y dice "20"), NO asumas que quiso decir $20 pesos — preguntale para confirmar
   ("¿son $20.000?") en vez de mandar "cashAmount" con el valor literal. Solo mandá el número tal cual si es
-  razonable frente al total, o si el cliente ya aclaró la unidad (dijo "mil" o el número completo).
+  razonable frente al total, o si el cliente ya aclaró la unidad (dijo "mil" o el número completo). MUY
+  IMPORTANTE: el sistema NUNCA deja confirmar un pedido si "cashAmount" queda por debajo del total — si lo
+  mandás literal sin preguntar, el cliente va a quedar trabado pidiéndole de nuevo el monto en el peor
+  momento (cuando ya cree que confirmó). Preguntar ANTES evita ese ida y vuelta.
   MUY IMPORTANTE: si el cliente elige "efectivo" y todavía no dijo con cuánto va a pagar,
   SIEMPRE preguntáselo en tu "reply" antes de armar el resumen final (para poder calcular el vuelto y avisar
   si el repartidor necesita llevar cambio) — no des el medio de pago por completo hasta tener ese dato o hasta
