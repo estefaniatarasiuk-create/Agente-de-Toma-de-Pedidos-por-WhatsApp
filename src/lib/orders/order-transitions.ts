@@ -171,6 +171,15 @@ export async function updateOrderItems(params: {
   orderId: string;
   userId: string;
   items: Array<{ productId: string; quantity: number }>;
+  // Bug real reportado: "Sumarlos al pedido" (el botón que aparece cuando
+  // el cliente pidió más por WhatsApp mientras este pedido seguía en
+  // curso) guarda los ítems acá, pero nunca tocaba el borrador de la
+  // conversación de donde salieron — ese borrador seguía con el mismo
+  // ítem "pendiente" para siempre. En un pedido posterior y sin relación,
+  // ese ítem fantasma se sumaba solo al nuevo pedido en cuanto la IA
+  // volvía a estar activa. Cuando este guardado resuelve esos ítems
+  // pendientes, hay que vaciar el borrador para que no reaparezcan.
+  resolvesPendingDraft?: boolean;
 }): Promise<UpdateItemsResult> {
   const order = await prisma.order.findFirst({ where: { id: params.orderId, branchId: params.branchId } });
   if (!order) return { status: "not_found" };
@@ -217,10 +226,17 @@ export async function updateOrderItems(params: {
   const updated = await prisma.$transaction(async (tx) => {
     await tx.orderItem.deleteMany({ where: { orderId: order.id } });
     await tx.orderItem.createMany({ data: items });
-    return tx.order.update({
+    const updatedOrder = await tx.order.update({
       where: { id: order.id },
       data: { subtotalCents: totalCents, totalCents, changeAmountCents },
     });
+    if (params.resolvesPendingDraft && order.conversationId) {
+      await tx.conversation.update({
+        where: { id: order.conversationId },
+        data: { draftOrder: { items: [] }, currentStep: null },
+      });
+    }
+    return updatedOrder;
   });
 
   // No es un cambio de estado (from/to quedan iguales), pero reusar

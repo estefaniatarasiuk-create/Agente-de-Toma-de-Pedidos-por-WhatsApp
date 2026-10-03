@@ -83,6 +83,14 @@ export function OrderDetailPanel({
 
   const [editingItems, setEditingItems] = useState(false);
   const [stagedItems, setStagedItems] = useState<StagedItem[]>([]);
+  // Bug real reportado: guardar los ítems pendientes de "Sumarlos al
+  // pedido" nunca vaciaba el borrador de la conversación de donde
+  // salieron — ese mismo ítem reaparecía solo, sumado a un pedido
+  // posterior sin relación, en cuanto la IA volvía a estar activa. Esta
+  // bandera distingue ese guardado (hay que vaciar el borrador) de una
+  // edición manual común de "Editar productos" (no hay que tocar nada de
+  // la conversación).
+  const [editingResolvesPendingDraft, setEditingResolvesPendingDraft] = useState(false);
   const [products, setProducts] = useState<Product[] | null>(null);
   const [addProductId, setAddProductId] = useState("");
   const [savingItems, setSavingItems] = useState(false);
@@ -144,7 +152,7 @@ export function OrderDetailPanel({
     if (response.ok) setProducts(data.products);
   }
 
-  function startEditingItems(initialItems?: StagedItem[]) {
+  function startEditingItems(initialItems?: StagedItem[], resolvesPendingDraft = false) {
     if (!order) return;
     setStagedItems(
       initialItems ??
@@ -162,6 +170,7 @@ export function OrderDetailPanel({
     );
     setItemsError(null);
     setEditingItems(true);
+    setEditingResolvesPendingDraft(resolvesPendingDraft);
     loadProducts();
   }
 
@@ -188,7 +197,7 @@ export function OrderDetailPanel({
         });
       }
     }
-    startEditingItems(merged);
+    startEditingItems(merged, true);
   }
 
   function handleAddProduct() {
@@ -227,6 +236,7 @@ export function OrderDetailPanel({
       body: JSON.stringify({
         action: "update_items",
         items: stagedItems.map((item) => ({ productId: item.productId, quantity: item.quantity })),
+        resolvesPendingDraft: editingResolvesPendingDraft,
       }),
     });
     const data = await response.json();

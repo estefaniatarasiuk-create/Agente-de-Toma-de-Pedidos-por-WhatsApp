@@ -47,7 +47,13 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       : parsed.data.action === "validate_payment"
         ? await validateOrderPayment({ branchId: context.branchId, orderId: id, userId: context.userId })
         : parsed.data.action === "update_items"
-          ? await updateOrderItems({ branchId: context.branchId, orderId: id, userId: context.userId, items: parsed.data.items })
+          ? await updateOrderItems({
+              branchId: context.branchId,
+              orderId: id,
+              userId: context.userId,
+              items: parsed.data.items,
+              resolvesPendingDraft: parsed.data.resolvesPendingDraft,
+            })
           : await cancelOrder({ branchId: context.branchId, orderId: id, userId: context.userId, reason: parsed.data.reason });
 
   if (result.status === "not_found") return NextResponse.json({ error: "Pedido no encontrado." }, { status: 404 });

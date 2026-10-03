@@ -12,6 +12,10 @@ export const orderActionSchema = z.discriminatedUnion("action", [
     items: z
       .array(z.object({ productId: z.string().min(1), quantity: z.number().int().min(1) }))
       .min(1, "El pedido necesita al menos un producto."),
+    // true cuando este guardado resuelve los ítems que el cliente pidió
+    // por WhatsApp mientras el pedido seguía en curso ("Sumarlos al
+    // pedido" en el panel) — ver el comentario en updateOrderItems.
+    resolvesPendingDraft: z.boolean().optional(),
   }),
 ]);
 

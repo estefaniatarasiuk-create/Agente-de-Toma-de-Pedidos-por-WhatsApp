@@ -259,4 +259,68 @@ describe("order-transitions — updateOrderItems", () => {
     });
     expect(result.status).toBe("invalid_items");
   });
+
+  // Regresión de un bug real: "Sumarlos al pedido" (el panel, cuando el
+  // cliente pidió más por WhatsApp mientras este pedido seguía en curso)
+  // guardaba los ítems en el pedido pero nunca vaciaba el borrador de la
+  // conversación de donde salieron — ese mismo ítem "pendiente" quedaba
+  // ahí para siempre y se volvía a sumar solo a un pedido posterior sin
+  // relación, en cuanto la IA volvía a estar activa.
+  it("vacía el borrador de la conversación cuando resolvesPendingDraft es true", async () => {
+    const { company, branch } = await createTestCompanyAndBranch();
+    companiesToCleanup.push(company.id);
+    const user = await prisma.user.create({
+      data: { companyId: company.id, email: `op-${Date.now()}@test.com`, passwordHash: "x", name: "Operador" },
+    });
+    const product = await prisma.product.create({
+      data: { companyId: company.id, branchId: branch.id, name: "Chipa", priceCents: 300000 },
+    });
+    const order = await createOrder(branch.id, company.id, { status: "PENDING" });
+    // El borrador todavía tiene el ítem pendiente que se está por sumar acá.
+    await prisma.conversation.update({
+      where: { id: order.conversationId! },
+      data: { draftOrder: { items: [{ productId: product.id, productName: product.name, unitPriceCents: product.priceCents, quantity: 1 }] } },
+    });
+
+    const result = await updateOrderItems({
+      branchId: branch.id,
+      orderId: order.id,
+      userId: user.id,
+      items: [{ productId: product.id, quantity: 1 }],
+      resolvesPendingDraft: true,
+    });
+
+    expect(result.status).toBe("ok");
+    const conversation = await prisma.conversation.findUniqueOrThrow({ where: { id: order.conversationId! } });
+    expect(conversation.draftOrder).toEqual({ items: [] });
+    expect(conversation.currentStep).toBeNull();
+  });
+
+  it("no toca el borrador de la conversación en una edición común (resolvesPendingDraft ausente)", async () => {
+    const { company, branch } = await createTestCompanyAndBranch();
+    companiesToCleanup.push(company.id);
+    const user = await prisma.user.create({
+      data: { companyId: company.id, email: `op-${Date.now()}@test.com`, passwordHash: "x", name: "Operador" },
+    });
+    const product = await prisma.product.create({
+      data: { companyId: company.id, branchId: branch.id, name: "Chipa", priceCents: 300000 },
+    });
+    const order = await createOrder(branch.id, company.id, { status: "PENDING" });
+    // Esto podría ser un pedido NUEVO y sin relación que el cliente está
+    // armando por WhatsApp en paralelo — una edición manual común del
+    // pedido viejo no tiene por qué pisarlo.
+    const unrelatedDraft = { items: [{ productId: "otro-producto", productName: "Otro", unitPriceCents: 100000, quantity: 1 }] };
+    await prisma.conversation.update({ where: { id: order.conversationId! }, data: { draftOrder: unrelatedDraft } });
+
+    const result = await updateOrderItems({
+      branchId: branch.id,
+      orderId: order.id,
+      userId: user.id,
+      items: [{ productId: product.id, quantity: 3 }],
+    });
+
+    expect(result.status).toBe("ok");
+    const conversation = await prisma.conversation.findUniqueOrThrow({ where: { id: order.conversationId! } });
+    expect(conversation.draftOrder).toEqual(unrelatedDraft);
+  });
 });
