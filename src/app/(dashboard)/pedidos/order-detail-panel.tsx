@@ -384,9 +384,21 @@ export function OrderDetailPanel({
 
               <div>
                 <h3 className="text-xs font-semibold uppercase text-gray-600">Entrega</h3>
-                <p className="mt-1 text-sm text-gray-800">{order.deliveryAddressRaw}</p>
-                {order.deliveryAddressNormalized && (
-                  <p className="text-xs text-gray-600">{order.deliveryAddressNormalized}</p>
+                {/* Bug real reportado: el panel mostraba como principal el
+                    texto tal cual lo escribió el cliente (deliveryAddressRaw
+                    — a veces sin altura, con errores de tipeo, o la versión
+                    vieja antes de que el cliente confirmara una corrección
+                    sugerida) y la dirección validada quedaba como un dato
+                    secundario chiquito. Lo que el repartidor necesita leer
+                    primero es la dirección VALIDADA (la que el cliente
+                    terminó confirmando, con altura real) — se invierte el
+                    orden; el texto original del cliente queda como
+                    referencia chica solo si es distinto. */}
+                <p className="mt-1 text-sm text-gray-800">
+                  {order.deliveryAddressNormalized ?? order.deliveryAddressRaw}
+                </p>
+                {order.deliveryAddressNormalized && order.deliveryAddressNormalized !== order.deliveryAddressRaw && (
+                  <p className="text-xs text-gray-600">Como lo escribió el cliente: {order.deliveryAddressRaw}</p>
                 )}
                 {order.deliveryNotes && <p className="text-xs text-gray-600">Notas: {order.deliveryNotes}</p>}
               </div>
