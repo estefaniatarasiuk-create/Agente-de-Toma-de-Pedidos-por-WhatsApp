@@ -64,6 +64,35 @@ async function processInboundMessageLocked(params: { conversationId: string; mes
     });
   }
 
+  let draft = draftOrderStateSchema.safeParse(conversation.draftOrder).success
+    ? draftOrderStateSchema.parse(conversation.draftOrder)
+    : EMPTY_DRAFT_ORDER;
+
+  // Bug real: un pedido anterior abandonado sin confirmar (bloqueado, o
+  // simplemente sin cerrar) dejaba sus ítems/domicilio/pago en el borrador
+  // — si el cliente después arrancaba un pedido totalmente nuevo, esos
+  // datos viejos se sumaban en silencio al nuevo. "Quiero pedir"/"hacer un
+  // pedido" es una señal clara e inequívoca de que el cliente quiere
+  // empezar de cero, así que no dependemos de que la IA se dé cuenta sola
+  // de que hay que descartar lo anterior.
+  if (
+    message.textContent &&
+    isNewOrderIntentText(message.textContent) &&
+    (draft.items.length > 0 || draft.deliveryAddressRaw || draft.paymentMethod)
+  ) {
+    draft = { items: [] };
+  }
+
+  // Pedido explícito del usuario: antes, si el cliente no daba su nombre,
+  // se usaba en silencio el nombre de perfil de WhatsApp como si el
+  // cliente lo hubiera confirmado — pero ese nombre suele ser un apodo o
+  // un alias (emojis, nombre de fantasía, etc.), no el nombre real para la
+  // entrega. Se probó pasárselo a la IA como sugerencia para ofrecer y
+  // confirmar, pero en la práctica la IA lo siguió usando para dirigirse
+  // al cliente sin haberlo confirmado nunca — así que ya no se le pasa en
+  // absoluto: el nombre del pedido es SIEMPRE el que el cliente escribe en
+  // la conversación, sin ningún atajo.
+
   // Bug real reportado: con la IA pausada o la conversación derivada a un
   // humano (ej. alguien usó "Hablar con el cliente" desde el pedido y le
   // pidió reenviar el comprobante), el chequeo de "no respondemos
@@ -80,7 +109,22 @@ async function processInboundMessageLocked(params: { conversationId: string; mes
       where: { branchId: conversation.branchId, customerPhone: conversation.customerPhone, status: "WAITING_RECEIPT" },
       orderBy: { createdAt: "desc" },
     });
-    if (waitingOrder) {
+    // Bug real reportado: si el cliente YA tiene un pedido esperando
+    // comprobante pero en paralelo está completando un pedido NUEVO por
+    // transferencia (ej. "agregame una coca" a un pedido que ya está en
+    // curso), este comprobante probablemente sea para el pedido NUEVO —
+    // antes se adjuntaba siempre al viejo sin mirar esto, el turno cortaba
+    // acá mismo (return), y el pedido nuevo quedaba sin confirmar NI
+    // escalar a una persona: el comprobante se perdía pisando al del
+    // pedido viejo, y el ítem nuevo nunca aparecía en ningún lado. Si el
+    // borrador actual ya está listo para confirmar por transferencia (y la
+    // IA está activa para procesarlo), dejamos que el punto 2 de más abajo
+    // — que sí contempla este caso, incluida la derivación si hay un
+    // pedido activo con otros ítems — decida qué hacer con este archivo,
+    // en vez de asumir a ciegas que es para el pedido viejo.
+    const draftLooksReadyForNewTransferOrder =
+      conversation.status === "ACTIVE" && draft.paymentMethod === "TRANSFER" && computeCurrentStep(draft) === "CONFIRMING";
+    if (waitingOrder && !draftLooksReadyForNewTransferOrder) {
       const isResend = waitingOrder.receiptUrl !== null;
       await prisma.order.update({
         where: { id: waitingOrder.id },
@@ -150,35 +194,6 @@ async function processInboundMessageLocked(params: { conversationId: string; mes
     return;
   }
 
-  let draft = draftOrderStateSchema.safeParse(conversation.draftOrder).success
-    ? draftOrderStateSchema.parse(conversation.draftOrder)
-    : EMPTY_DRAFT_ORDER;
-
-  // Bug real: un pedido anterior abandonado sin confirmar (bloqueado, o
-  // simplemente sin cerrar) dejaba sus ítems/domicilio/pago en el borrador
-  // — si el cliente después arrancaba un pedido totalmente nuevo, esos
-  // datos viejos se sumaban en silencio al nuevo. "Quiero pedir"/"hacer un
-  // pedido" es una señal clara e inequívoca de que el cliente quiere
-  // empezar de cero, así que no dependemos de que la IA se dé cuenta sola
-  // de que hay que descartar lo anterior.
-  if (
-    message.textContent &&
-    isNewOrderIntentText(message.textContent) &&
-    (draft.items.length > 0 || draft.deliveryAddressRaw || draft.paymentMethod)
-  ) {
-    draft = { items: [] };
-  }
-
-  // Pedido explícito del usuario: antes, si el cliente no daba su nombre,
-  // se usaba en silencio el nombre de perfil de WhatsApp como si el
-  // cliente lo hubiera confirmado — pero ese nombre suele ser un apodo o
-  // un alias (emojis, nombre de fantasía, etc.), no el nombre real para la
-  // entrega. Se probó pasárselo a la IA como sugerencia para ofrecer y
-  // confirmar, pero en la práctica la IA lo siguió usando para dirigirse
-  // al cliente sin haberlo confirmado nunca — así que ya no se le pasa en
-  // absoluto: el nombre del pedido es SIEMPRE el que el cliente escribe en
-  // la conversación, sin ningún atajo.
-
   // 2. Comprobante de un pedido en curso, TODAVÍA sin confirmar: si el
   // pedido en curso ya está completo y eligió transferencia, mandar la foto
   // cuenta como confirmación implícita (ver más abajo). El caso de un
@@ -215,8 +230,31 @@ async function processInboundMessageLocked(params: { conversationId: string; mes
         });
         return;
       }
-      // Si no se pudo confirmar (ej. un producto se desactivó justo ahora),
-      // seguimos al flujo normal de abajo para que la IA le avise por qué.
+      // Bug real reportado: si el cliente ya tenía un pedido activo con
+      // OTROS ítems, confirmar por imagen caía acá (derivar a un humano,
+      // igual que confirmar por texto) — pero antes nada manejaba este
+      // caso puntual, así que el turno seguía de largo hacia el flujo
+      // normal de la IA con el borrador YA desactualizado (el intento de
+      // confirm_order pudo haber tocado confirmAttempts), sin avisarle
+      // nada al cliente sobre la derivación ni guardar el comprobante en
+      // ningún lado. Mismo manejo que el bloqueo por texto en el punto 3.
+      if (confirmResult.requiresHuman) {
+        await prisma.conversation.update({
+          where: { id: conversation.id },
+          data: {
+            status: "REQUIRES_ATTENTION",
+            draftOrder: confirmResult.preserveDraftOnEscalation ? (confirmResult.draft as unknown as object) : { items: [] },
+            currentStep: confirmResult.preserveDraftOnEscalation ? computeCurrentStep(confirmResult.draft) : null,
+          },
+        });
+        await sendText(
+          confirmResult.correctionNotes.length > 0 ? confirmResult.correctionNotes.join("\n\n") : buildRequiresHumanMessage(),
+        );
+        return;
+      }
+      // Si no se pudo confirmar por otro motivo (ej. un producto se
+      // desactivó justo ahora), seguimos al flujo normal de abajo para que
+      // la IA le avise por qué.
     }
   }
 
