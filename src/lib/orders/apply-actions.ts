@@ -10,6 +10,7 @@ import { createOrderFromDraft, haveSameItems } from "@/lib/orders/create-order";
 import {
   computeCurrentStep,
   computeDraftItemsTotalCents,
+  extractExplicitPaymentMethodText,
   getMissingOrderFields,
   looksLikeConfirmationText,
   MISSING_FIELD_LABEL,
@@ -435,6 +436,28 @@ export async function applyActions(params: {
     if (action.type === "send_catalog_image") {
       extras.push({ kind: "catalog_image" });
       continue;
+    }
+  }
+
+  // Bug real reportado: el cliente respondió "transferencia" sola, sin
+  // nada más, a la pregunta de medio de pago — y la IA no mandó
+  // "set_payment_method" en ese turno, dejando al cliente repitiendo la
+  // misma respuesta mientras el sistema insistía "todavía me falta cómo
+  // vas a pagar". Último respaldo: si el turno no trajo NINGÚN
+  // "set_payment_method" y el mensaje del cliente es, textualmente, nada
+  // más que "efectivo" o "transferencia", lo aplicamos directo.
+  if (!draft.paymentMethod && params.customerMessageText && !params.actions.some((action) => action.type === "set_payment_method")) {
+    const explicitMethod = extractExplicitPaymentMethodText(params.customerMessageText);
+    if (explicitMethod) {
+      const paymentConfig = await prisma.paymentMethodConfig.findUnique({ where: { branchId: params.branchId } });
+      const enabled = explicitMethod === "CASH" ? paymentConfig?.cashEnabled : paymentConfig?.transferEnabled;
+      if (enabled) {
+        draft.paymentMethod = explicitMethod;
+        draftChangedThisTurn = true;
+        if (explicitMethod === "TRANSFER" && paymentConfig) {
+          paymentConfigForNewTransfer = paymentConfig;
+        }
+      }
     }
   }
 

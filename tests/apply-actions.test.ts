@@ -1510,3 +1510,160 @@ describe("applyActions — no confirma un pedido en efectivo sin el monto con el
     expect(orders[0].cashPaymentAmountCents).toBe(1000000);
   });
 });
+
+// Regresión de un bug real: el cliente respondió "transferencia" sola, sin
+// nada más, a la pregunta de medio de pago — y la IA no incluyó
+// set_payment_method en ese turno. El sistema quedó pidiendo lo mismo en
+// loop ("todavía me falta cómo vas a pagar") pese a que la respuesta del
+// cliente era inequívoca. Último respaldo: si el turno no trae ningún
+// set_payment_method y el mensaje es, textualmente, nada más que
+// "efectivo" o "transferencia", se aplica directo.
+describe("applyActions — reconoce 'transferencia'/'efectivo' solos aunque la IA no haya mandado set_payment_method", () => {
+  const companiesToCleanup: string[] = [];
+
+  afterAll(async () => {
+    for (const companyId of companiesToCleanup) await cleanupCompany(companyId);
+  });
+
+  it("aplica TRANSFER y manda los datos bancarios si la IA se olvidó de set_payment_method", async () => {
+    const { company, branch } = await createTestCompanyAndBranch();
+    companiesToCleanup.push(company.id);
+    const product = await prisma.product.create({
+      data: { companyId: company.id, branchId: branch.id, name: "Chipa", priceCents: 300000 },
+    });
+    await prisma.paymentMethodConfig.create({
+      data: { companyId: company.id, branchId: branch.id, cashEnabled: true, transferEnabled: true },
+    });
+    const conversation = await prisma.conversation.create({
+      data: { companyId: company.id, branchId: branch.id, customerPhone: "5491100000047" },
+    });
+
+    const draft = {
+      items: [{ productId: product.id, productName: product.name, unitPriceCents: product.priceCents, quantity: 1 }],
+      customerName: "Cliente Test",
+      deliveryAddressRaw: "Calle Falsa 123",
+      deliveryLatitude: -34.6,
+      deliveryLongitude: -58.38,
+    };
+
+    const result = await applyActions({
+      companyId: company.id,
+      branchId: branch.id,
+      conversationId: conversation.id,
+      customerPhone: "5491100000047",
+      draft,
+      actions: [],
+      customerMessageText: "transferencia",
+    });
+
+    expect(result.draft.paymentMethod).toBe("TRANSFER");
+    expect(
+      result.extras.some((extra) => extra.kind === "text" && extra.text.includes("estos son los datos de la cuenta")),
+    ).toBe(true);
+  });
+
+  it("aplica CASH si el mensaje es solo 'efectivo'", async () => {
+    const { company, branch } = await createTestCompanyAndBranch();
+    companiesToCleanup.push(company.id);
+    const product = await prisma.product.create({
+      data: { companyId: company.id, branchId: branch.id, name: "Chipa", priceCents: 300000 },
+    });
+    await prisma.paymentMethodConfig.create({
+      data: { companyId: company.id, branchId: branch.id, cashEnabled: true, transferEnabled: true },
+    });
+    const conversation = await prisma.conversation.create({
+      data: { companyId: company.id, branchId: branch.id, customerPhone: "5491100000048" },
+    });
+
+    const draft = {
+      items: [{ productId: product.id, productName: product.name, unitPriceCents: product.priceCents, quantity: 1 }],
+      customerName: "Cliente Test",
+      deliveryAddressRaw: "Calle Falsa 123",
+      deliveryLatitude: -34.6,
+      deliveryLongitude: -58.38,
+    };
+
+    const result = await applyActions({
+      companyId: company.id,
+      branchId: branch.id,
+      conversationId: conversation.id,
+      customerPhone: "5491100000048",
+      draft,
+      actions: [],
+      customerMessageText: "efectivo",
+    });
+
+    expect(result.draft.paymentMethod).toBe("CASH");
+  });
+
+  it("no hace nada si la IA ya mandó set_payment_method en el mismo turno (no duplica el trabajo)", async () => {
+    const { company, branch } = await createTestCompanyAndBranch();
+    companiesToCleanup.push(company.id);
+    const product = await prisma.product.create({
+      data: { companyId: company.id, branchId: branch.id, name: "Chipa", priceCents: 300000 },
+    });
+    await prisma.paymentMethodConfig.create({
+      data: { companyId: company.id, branchId: branch.id, cashEnabled: true, transferEnabled: false },
+    });
+    const conversation = await prisma.conversation.create({
+      data: { companyId: company.id, branchId: branch.id, customerPhone: "5491100000049" },
+    });
+
+    const draft = {
+      items: [{ productId: product.id, productName: product.name, unitPriceCents: product.priceCents, quantity: 1 }],
+      customerName: "Cliente Test",
+      deliveryAddressRaw: "Calle Falsa 123",
+      deliveryLatitude: -34.6,
+      deliveryLongitude: -58.38,
+    };
+
+    // El medio de pago que pide el cliente en texto está deshabilitado,
+    // pero la IA ya mandó set_payment_method con CASH (habilitado) — el
+    // respaldo no tiene que pisar esa decisión.
+    const result = await applyActions({
+      companyId: company.id,
+      branchId: branch.id,
+      conversationId: conversation.id,
+      customerPhone: "5491100000049",
+      draft,
+      actions: [{ type: "set_payment_method", method: "CASH" }],
+      customerMessageText: "transferencia",
+    });
+
+    expect(result.draft.paymentMethod).toBe("CASH");
+  });
+
+  it("no interpreta la palabra si viene dentro de una frase más larga (evita malinterpretar una negación)", async () => {
+    const { company, branch } = await createTestCompanyAndBranch();
+    companiesToCleanup.push(company.id);
+    const product = await prisma.product.create({
+      data: { companyId: company.id, branchId: branch.id, name: "Chipa", priceCents: 300000 },
+    });
+    await prisma.paymentMethodConfig.create({
+      data: { companyId: company.id, branchId: branch.id, cashEnabled: true, transferEnabled: true },
+    });
+    const conversation = await prisma.conversation.create({
+      data: { companyId: company.id, branchId: branch.id, customerPhone: "5491100000050" },
+    });
+
+    const draft = {
+      items: [{ productId: product.id, productName: product.name, unitPriceCents: product.priceCents, quantity: 1 }],
+      customerName: "Cliente Test",
+      deliveryAddressRaw: "Calle Falsa 123",
+      deliveryLatitude: -34.6,
+      deliveryLongitude: -58.38,
+    };
+
+    const result = await applyActions({
+      companyId: company.id,
+      branchId: branch.id,
+      conversationId: conversation.id,
+      customerPhone: "5491100000050",
+      draft,
+      actions: [],
+      customerMessageText: "no quiero pagar por transferencia, prefiero efectivo",
+    });
+
+    expect(result.draft.paymentMethod).toBeUndefined();
+  });
+});

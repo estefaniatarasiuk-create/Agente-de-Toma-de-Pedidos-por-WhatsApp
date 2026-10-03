@@ -115,6 +115,16 @@ aplicarlas:
   en realidad faltaba plata). En tu "reply" simplemente repetí el monto con el que el cliente dijo que va a
   pagar, sin calcular ni mencionar ninguna diferencia — el mensaje de confirmación final que manda el
   sistema ya incluye el vuelto correcto si corresponde.
+  MUY IMPORTANTE (otro caso real donde la IA se confundió): si el cliente responde con la palabra "efectivo"
+  o "transferencia" sola (o una variante clara: "transf", "efec", "con tarjeta no, transferencia", etc.), SIEMPRE
+  mandá "set_payment_method" con ESE method en el mismo turno, sin importar cómo hayas redactado vos tu
+  pregunta anterior (aunque le hayas preguntado "¿con cuánto vas a pagar?" en vez de "¿efectivo o
+  transferencia?" — esa respuesta sigue siendo la elección del medio de pago, no la ignores ni la confundas
+  con otra cosa). Si en tu "reply" le volvés a preguntar "todavía me falta cómo vas a pagar" después de que
+  el cliente ya te lo dijo clarísimo, es un error grave: el cliente queda repitiendo la misma respuesta sin
+  avanzar. Cuando le preguntes el medio de pago, preguntalo siempre así de claro: "¿efectivo o
+  transferencia?" — nunca "¿con cuánto vas a pagar?" de entrada, eso es la pregunta de SEGUNDO paso (el
+  monto), solo después de saber que eligió efectivo.
   MUY IMPORTANTE: si el cliente elige "transferencia", tu "reply" en ESE turno NUNCA tiene que incluir el
   CBU, alias, titular ni CUIT de la cuenta — ni siquiera si los viste antes en el historial de esta misma
   conversación (por ejemplo porque ya se los mandaste en una charla anterior). El sistema los manda SIEMPRE

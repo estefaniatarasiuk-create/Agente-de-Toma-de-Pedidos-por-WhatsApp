@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { isNewOrderIntentText, looksLikeConfirmationText, shouldClearDraftOnHandoverToAI } from "@/lib/orders/draft-step";
+import {
+  extractExplicitPaymentMethodText,
+  isNewOrderIntentText,
+  looksLikeConfirmationText,
+  shouldClearDraftOnHandoverToAI,
+} from "@/lib/orders/draft-step";
 
 describe("isNewOrderIntentText", () => {
   it("detecta frases típicas de arrancar un pedido nuevo", () => {
@@ -62,5 +67,26 @@ describe("shouldClearDraftOnHandoverToAI", () => {
     expect(shouldClearDraftOnHandoverToAI("ACTIVE", "ACTIVE")).toBe(false);
     expect(shouldClearDraftOnHandoverToAI("REQUIRES_ATTENTION", "AI_PAUSED")).toBe(false);
     expect(shouldClearDraftOnHandoverToAI("CLOSED", "ACTIVE")).toBe(false);
+  });
+});
+
+// Regresión de un bug real: el cliente respondió "transferencia" sola, sin
+// nada más, y la IA no llamó a set_payment_method — el sistema quedó
+// pidiendo lo mismo en loop pese a que la respuesta era inequívoca.
+describe("extractExplicitPaymentMethodText", () => {
+  it("reconoce la palabra sola, con variantes y mayúsculas/minúsculas", () => {
+    expect(extractExplicitPaymentMethodText("transferencia")).toBe("TRANSFER");
+    expect(extractExplicitPaymentMethodText("Transferencia")).toBe("TRANSFER");
+    expect(extractExplicitPaymentMethodText("transf")).toBe("TRANSFER");
+    expect(extractExplicitPaymentMethodText("transferencia.")).toBe("TRANSFER");
+    expect(extractExplicitPaymentMethodText("  transferencia  ")).toBe("TRANSFER");
+    expect(extractExplicitPaymentMethodText("efectivo")).toBe("CASH");
+    expect(extractExplicitPaymentMethodText("efec")).toBe("CASH");
+  });
+
+  it("no reconoce la palabra mezclada en una frase más larga (para no malinterpretar una negación)", () => {
+    expect(extractExplicitPaymentMethodText("no quiero pagar por transferencia, prefiero efectivo")).toBeNull();
+    expect(extractExplicitPaymentMethodText("con transferencia está bien")).toBeNull();
+    expect(extractExplicitPaymentMethodText("una pizza muzzarella porfa")).toBeNull();
   });
 });

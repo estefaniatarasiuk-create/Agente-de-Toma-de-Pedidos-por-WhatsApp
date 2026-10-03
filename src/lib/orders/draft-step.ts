@@ -121,3 +121,20 @@ export function computeCurrentStep(draft: DraftOrderState): string | null {
     return "ASKING_PAYMENT_METHOD";
   return "CONFIRMING";
 }
+
+// Bug real reportado: el cliente respondió "transferencia" (sola, sin nada
+// más) a la pregunta de medio de pago, y la IA no llamó a
+// "set_payment_method" en ese turno — el sistema quedó pidiendo lo mismo en
+// loop ("todavía me falta cómo vas a pagar"), pese a que la respuesta del
+// cliente era inequívoca. Se usa como último respaldo en apply-actions.ts
+// SOLO si la IA no mandó ningún "set_payment_method" en el turno: a
+// propósito exige que el mensaje sea nada más que esta palabra (sin texto
+// alrededor) para no interpretar mal una frase como "no quiero pagar por
+// transferencia, prefiero efectivo".
+const EXPLICIT_PAYMENT_METHOD_RE = /^(efectivo|efec|transferencia|transf)[.!¡]?$/i;
+
+export function extractExplicitPaymentMethodText(text: string): "CASH" | "TRANSFER" | null {
+  const match = EXPLICIT_PAYMENT_METHOD_RE.exec(text.trim());
+  if (!match) return null;
+  return match[1].toLowerCase().startsWith("efec") ? "CASH" : "TRANSFER";
+}
