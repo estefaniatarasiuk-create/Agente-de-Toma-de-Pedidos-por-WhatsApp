@@ -483,11 +483,37 @@ model Order {
   items                  OrderItem[]
   statusEvents           OrderStatusEvent[]
   aiUsageLogs            AIUsageLog[]
+  receipts               OrderReceipt[]
 
   @@index([companyId])
   @@index([branchId, status])
   @@index([branchId, createdAt])
   @@map("orders")
+}
+
+// Historial de comprobantes de un pedido (bug real reportado: un pedido
+// puede recibir más de un comprobante legítimo con el tiempo — ej. el pago
+// original y, más tarde, uno aparte por un producto agregado al mismo
+// pedido — y "receiptUrl"/"receiptReceivedAt" de Order, al ser un solo
+// valor, solo puede guardar el ÚLTIMO; el anterior se perdía sin dejar
+// rastro en el panel). Esos dos campos de Order siguen siendo la fuente de
+// verdad para la lógica del sistema (auto-cancelación, validar el pasaje a
+// preparación, detectar reutilización de comprobantes — todos miran el
+// último comprobante recibido), esta tabla es solo el historial completo
+// para mostrarle al operador.
+model OrderReceipt {
+  id         String   @id @default(cuid())
+  companyId  String
+  branchId   String
+  orderId    String
+  mediaUrl   String
+  receivedAt DateTime @default(now())
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([companyId])
+  @@index([orderId])
+  @@map("order_receipts")
 }
 
 model OrderItem {

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import type { ConversationStatus, Order, OrderItem, OrderStatus, OrderStatusEvent, Product } from "@prisma/client";
+import type { ConversationStatus, Order, OrderItem, OrderReceipt, OrderStatus, OrderStatusEvent, Product } from "@prisma/client";
 import { formatCentsAsArs } from "@/lib/money";
 import { isImageFileUrl } from "@/lib/media-url";
 import { ORDER_STATUS_LABEL, ORDER_STATUS_BADGE_CLASS } from "@/lib/orders/order-status";
@@ -11,6 +11,10 @@ type OrderDetail = Order & {
   items: OrderItem[];
   statusEvents: (OrderStatusEvent & { changedByUser: { name: string } | null })[];
   conversation: { id: string; status: ConversationStatus; draftOrder: unknown } | null;
+  // Historial completo (ver order-receipts.ts) — un pedido puede recibir
+  // más de un comprobante legítimo con el tiempo (ej. un agregado
+  // posterior), así que nunca alcanza con mostrar solo el más reciente.
+  receipts: OrderReceipt[];
 };
 
 type StagedItem = { productId: string; productName: string; unitPriceCents: number; quantity: number };
@@ -41,6 +45,26 @@ function getPendingDraftItems(
     items?: Array<{ productId: string; productName: string; unitPriceCents: number; quantity: number }>;
   } | null;
   return draft?.items ?? [];
+}
+
+// Un comprobante puede llegar como PDF (muy común: el home banking o
+// Mercado Pago lo exportan así) — un <img> no puede mostrar un PDF, se ve
+// como una imagen rota y parece que "no se lee" el archivo. Se abre en una
+// pestaña aparte en vez de intentar incrustarlo.
+function renderReceiptFile(mediaUrl: string) {
+  return isImageFileUrl(mediaUrl) ? (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img src={`/api/uploads/${mediaUrl}`} alt="Comprobante de transferencia" className="max-h-64 rounded-md border border-gray-200" />
+  ) : (
+    <a
+      href={`/api/uploads/${mediaUrl}`}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="inline-block rounded-md border border-gray-300 px-3 py-2 text-sm font-medium text-green-700 underline"
+    >
+      Ver comprobante (PDF)
+    </a>
+  );
 }
 
 export function OrderDetailPanel({
@@ -414,31 +438,39 @@ export function OrderDetailPanel({
                     ? ` (vuelto: ${formatCentsAsArs(order.changeAmountCents)})`
                     : ""}
                 </p>
-                {order.receiptUrl && (
+                {/* Bug real reportado: un pedido puede recibir más de un
+                    comprobante legítimo con el tiempo (ej. el pago original
+                    y, más tarde, uno aparte por un producto agregado al
+                    mismo pedido) — antes solo se guardaba el último, y el
+                    anterior se perdía sin dejar rastro acá. "receipts" es el
+                    historial completo (order-receipts.ts); si está vacío
+                    pero el pedido es de antes de que existiera ese
+                    historial, se cae al campo viejo "receiptUrl". */}
+                {(order.receipts.length > 0 || order.receiptUrl) && (
                   <div className="mt-2">
-                    <p className="text-xs text-gray-600">Comprobante recibido:</p>
-                    {/* Un comprobante puede llegar como PDF (muy común: el
-                        home banking o Mercado Pago lo exportan así) — un
-                        <img> no puede mostrar un PDF, se ve como una imagen
-                        rota y parece que "no se lee" el archivo. Se abre en
-                        una pestaña aparte en vez de intentar incrustarlo. */}
-                    {isImageFileUrl(order.receiptUrl) ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={`/api/uploads/${order.receiptUrl}`}
-                        alt="Comprobante de transferencia"
-                        className="mt-1 max-h-64 rounded-md border border-gray-200"
-                      />
-                    ) : (
-                      <a
-                        href={`/api/uploads/${order.receiptUrl}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="mt-1 inline-block rounded-md border border-gray-300 px-3 py-2 text-sm font-medium text-green-700 underline"
-                      >
-                        Ver comprobante (PDF)
-                      </a>
-                    )}
+                    <p className="text-xs text-gray-600">
+                      {order.receipts.length > 1 ? `Comprobantes recibidos (${order.receipts.length}):` : "Comprobante recibido:"}
+                    </p>
+                    <div className="mt-1 space-y-3">
+                      {order.receipts.length > 0
+                        ? order.receipts.map((receipt, index) => (
+                            <div key={receipt.id}>
+                              {order.receipts.length > 1 && (
+                                <p className="text-xs text-gray-500">
+                                  {index + 1}.{" "}
+                                  {new Date(receipt.receivedAt).toLocaleString("es-AR", {
+                                    day: "2-digit",
+                                    month: "2-digit",
+                                    hour: "2-digit",
+                                    minute: "2-digit",
+                                  })}
+                                </p>
+                              )}
+                              {renderReceiptFile(receipt.mediaUrl)}
+                            </div>
+                          ))
+                        : order.receiptUrl && renderReceiptFile(order.receiptUrl)}
+                    </div>
                     {order.paymentValidated && (
                       <p className="mt-1 text-xs font-medium text-green-700">✓ Comprobante validado</p>
                     )}

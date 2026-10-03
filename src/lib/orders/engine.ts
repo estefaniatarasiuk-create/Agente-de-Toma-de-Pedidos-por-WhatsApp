@@ -14,6 +14,7 @@ import { buildRequiresHumanMessage } from "@/lib/orders/messages";
 import { scheduleConversationExpiry } from "@/lib/jobs/queues";
 import { computeCurrentStep, isNewOrderIntentText } from "@/lib/orders/draft-step";
 import { findReusableReceiptMediaUrl } from "@/lib/orders/receipt-reuse";
+import { recordOrderReceipt } from "@/lib/orders/order-receipts";
 import { withConversationLock } from "@/lib/orders/conversation-lock";
 import type { Message } from "@prisma/client";
 
@@ -126,9 +127,11 @@ async function processInboundMessageLocked(params: { conversationId: string; mes
       conversation.status === "ACTIVE" && draft.paymentMethod === "TRANSFER" && computeCurrentStep(draft) === "CONFIRMING";
     if (waitingOrder && !draftLooksReadyForNewTransferOrder) {
       const isResend = waitingOrder.receiptUrl !== null;
-      await prisma.order.update({
-        where: { id: waitingOrder.id },
-        data: { receiptUrl: message.mediaUrl, receiptReceivedAt: new Date() },
+      await recordOrderReceipt({
+        companyId: conversation.companyId,
+        branchId: conversation.branchId,
+        orderId: waitingOrder.id,
+        mediaUrl: message.mediaUrl,
       });
       if (conversation.status === "ACTIVE") {
         await sendText(
@@ -219,9 +222,11 @@ async function processInboundMessageLocked(params: { conversationId: string; mes
       });
       if (confirmResult.orderCreated && confirmResult.orderId) {
         await sendExtras(confirmResult.extras);
-        await prisma.order.update({
-          where: { id: confirmResult.orderId },
-          data: { receiptUrl: message.mediaUrl, receiptReceivedAt: new Date() },
+        await recordOrderReceipt({
+          companyId: conversation.companyId,
+          branchId: conversation.branchId,
+          orderId: confirmResult.orderId,
+          mediaUrl: message.mediaUrl,
         });
         await sendText("¡Recibimos tu comprobante! Ya lo estamos verificando y en breve pasa a preparación.");
         await prisma.conversation.update({
@@ -374,9 +379,11 @@ async function processInboundMessageLocked(params: { conversationId: string; mes
       branchId: conversation.branchId,
     });
     if (reusableMediaUrl) {
-      await prisma.order.update({
-        where: { id: orderId },
-        data: { receiptUrl: reusableMediaUrl, receiptReceivedAt: new Date() },
+      await recordOrderReceipt({
+        companyId: conversation.companyId,
+        branchId: conversation.branchId,
+        orderId,
+        mediaUrl: reusableMediaUrl,
       });
       await sendText("¡Ah, veo que ya nos habías mandado el comprobante! Ya lo estamos revisando.");
     }

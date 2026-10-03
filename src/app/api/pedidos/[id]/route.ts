@@ -19,6 +19,10 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
       // borrador de esa conversación queda con los productos pendientes de
       // sumar acá, en vez de perderse.
       conversation: { select: { id: true, status: true, draftOrder: true } },
+      // Historial completo de comprobantes (ver order-receipts.ts) — un
+      // pedido puede recibir más de uno con el tiempo (ej. un agregado
+      // posterior), y antes solo se veía el más reciente.
+      receipts: { orderBy: { receivedAt: "asc" } },
     },
   });
   if (!order) return NextResponse.json({ error: "Pedido no encontrado." }, { status: 404 });
