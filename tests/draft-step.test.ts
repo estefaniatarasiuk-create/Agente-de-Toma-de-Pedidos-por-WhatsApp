@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   extractExplicitPaymentMethodText,
+  extractTrailingPaymentMethodMention,
   isDraftEmpty,
   isDraftStale,
   isNewOrderIntentText,
@@ -91,6 +92,31 @@ describe("extractExplicitPaymentMethodText", () => {
     expect(extractExplicitPaymentMethodText("no quiero pagar por transferencia, prefiero efectivo")).toBeNull();
     expect(extractExplicitPaymentMethodText("con transferencia está bien")).toBeNull();
     expect(extractExplicitPaymentMethodText("una pizza muzzarella porfa")).toBeNull();
+  });
+});
+
+// Regresión de un bug real: el cliente dio la dirección y el medio de pago
+// en el mismo mensaje ("...1510, entre peron y barbieri. Transferencia"),
+// la dirección falló la validación, y la IA nunca mandó "set_payment_method"
+// — el dato se perdió, y el cliente tuvo que repetirlo varios mensajes
+// después ("pago por transferencia te dije").
+describe("extractTrailingPaymentMethodMention", () => {
+  it("reconoce el medio de pago como última frase de un mensaje más largo", () => {
+    expect(extractTrailingPaymentMethodMention("cid guidi de franc 1510, entre peron y barbieri. Transferencia")).toBe(
+      "TRANSFER",
+    );
+    expect(extractTrailingPaymentMethodMention("Juan Pérez, mi domicilio es Falsa 123. efectivo")).toBe("CASH");
+    expect(extractTrailingPaymentMethodMention("Falsa 123.\nTransferencia")).toBe("TRANSFER");
+  });
+
+  it("sigue reconociendo el mensaje que es nada más que la palabra (mismo criterio que la función base)", () => {
+    expect(extractTrailingPaymentMethodMention("transferencia")).toBe("TRANSFER");
+  });
+
+  it("no reconoce nada si la última frase tiene más texto que la palabra sola (evita malinterpretar una negación)", () => {
+    expect(extractTrailingPaymentMethodMention("no quiero pagar por transferencia, prefiero efectivo")).toBeNull();
+    expect(extractTrailingPaymentMethodMention("con transferencia está bien")).toBeNull();
+    expect(extractTrailingPaymentMethodMention("Falsa 123. mejor pago en efectivo")).toBeNull();
   });
 });
 

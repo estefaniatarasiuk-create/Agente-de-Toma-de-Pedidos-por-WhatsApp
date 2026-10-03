@@ -1,5 +1,4 @@
 import { prisma } from "@/lib/prisma";
-import type { PaymentMethodConfig } from "@prisma/client";
 import type { LlmAction, DraftOrderState } from "@/lib/validations/order-engine";
 import { findProductMatch, findSimilarProducts } from "@/lib/orders/catalog-matching";
 import { validateDeliveryAddress } from "@/lib/orders/zone-validation";
@@ -11,6 +10,7 @@ import {
   computeCurrentStep,
   computeDraftItemsTotalCents,
   extractExplicitPaymentMethodText,
+  extractTrailingPaymentMethodMention,
   getMissingOrderFields,
   looksLikeConfirmationText,
   MISSING_FIELD_LABEL,
@@ -93,18 +93,6 @@ export async function applyActions(params: {
   // Exigir un mensaje aparte para confirmar es más seguro que confiar en
   // que el modelo distinga "cliente confirma" de "cliente completa un dato".
   const wasReadyToConfirmBeforeThisTurn = computeCurrentStep(params.draft) === "CONFIRMING";
-  // Bug real reportado: los datos bancarios se mandaban apenas se procesaba
-  // set_payment_method con TRANSFER, sin importar si otra cosa del MISMO
-  // turno todavía tenía un problema sin resolver (ej. la IA reconfirmó el
-  // medio de pago justo cuando la dirección necesitaba una corrección) — el
-  // cliente recibía el CBU en medio de un problema pendiente, fuera de
-  // lugar. También se repetían cada vez que la IA "restataba" el medio de
-  // pago en un turno posterior, aunque ya se hubieran mandado antes. Se
-  // guarda acá (en vez de mandarlos al toque dentro del loop) para recién
-  // decidir DESPUÉS de procesar todas las acciones del turno: solo se
-  // mandan si el cliente de verdad está eligiendo transferencia por primera
-  // vez Y no quedó ningún otro problema sin resolver en este mismo turno.
-  let paymentConfigForNewTransfer: PaymentMethodConfig | null = null;
 
   // Si el cliente pide hablar con una persona, eso manda por sobre
   // cualquier otra cosa que la IA haya intentado hacer en el mismo turno.
@@ -266,13 +254,14 @@ export async function applyActions(params: {
         correctionNotes.push(`Ese medio de pago no está disponible acá. Contame cómo vas a pagar de las opciones que te ofrecimos.`);
         continue;
       }
-      // Capturado ANTES de pisar draft.paymentMethod: distingue "el cliente
-      // recién ahora eligió transferencia" de "la IA volvió a mandar la
-      // misma acción restatando el pedido" — solo en el primer caso
-      // corresponde (ver el bloque después del loop) mandar los datos
-      // bancarios.
-      const isNewTransferSelection = action.method === "TRANSFER" && draft.paymentMethod !== "TRANSFER";
-      if (action.method !== draft.paymentMethod) draftChangedThisTurn = true;
+      if (action.method !== draft.paymentMethod) {
+        draftChangedThisTurn = true;
+        // Nuevo medio de pago elegido (incluso si antes ya había sido
+        // transferencia y el cliente la volvió a elegir después de pasar
+        // por otra opción): si termina en transferencia, hay que volver a
+        // mandar los datos bancarios — ver el chequeo al final del archivo.
+        draft.bankDetailsSent = false;
+      }
       draft.paymentMethod = action.method;
       if (action.method === "CASH" && action.cashAmount !== undefined) {
         const cents = parsePriceToCents(action.cashAmount);
@@ -280,9 +269,6 @@ export async function applyActions(params: {
           draft.cashPaymentAmountCents = cents;
           draftChangedThisTurn = true;
         }
-      }
-      if (isNewTransferSelection && paymentConfig) {
-        paymentConfigForNewTransfer = paymentConfig;
       }
       continue;
     }
@@ -447,26 +433,59 @@ export async function applyActions(params: {
   // "set_payment_method" y el mensaje del cliente es, textualmente, nada
   // más que "efectivo" o "transferencia", lo aplicamos directo.
   if (!draft.paymentMethod && params.customerMessageText && !params.actions.some((action) => action.type === "set_payment_method")) {
-    const explicitMethod = extractExplicitPaymentMethodText(params.customerMessageText);
+    const explicitMethod =
+      extractExplicitPaymentMethodText(params.customerMessageText) ??
+      extractTrailingPaymentMethodMention(params.customerMessageText);
     if (explicitMethod) {
       const paymentConfig = await prisma.paymentMethodConfig.findUnique({ where: { branchId: params.branchId } });
       const enabled = explicitMethod === "CASH" ? paymentConfig?.cashEnabled : paymentConfig?.transferEnabled;
       if (enabled) {
         draft.paymentMethod = explicitMethod;
+        draft.bankDetailsSent = false;
         draftChangedThisTurn = true;
-        if (explicitMethod === "TRANSFER" && paymentConfig) {
-          paymentConfigForNewTransfer = paymentConfig;
-        }
       }
     }
   }
 
-  // Recién ACÁ, con todas las acciones del turno ya procesadas, se decide
-  // si corresponde mandar los datos bancarios — nunca si quedó algo más sin
-  // resolver en este mismo turno (ver la nota junto a
-  // paymentConfigForNewTransfer, más arriba).
-  if (paymentConfigForNewTransfer && correctionNotes.length === 0) {
-    extras.push({ kind: "text", text: buildPaymentInfoMessage(paymentConfigForNewTransfer) });
+  // Recién ACÁ, con todas las acciones del turno ya procesadas, se decide si
+  // corresponde mandar los datos bancarios — nunca si quedó algo más sin
+  // resolver en este mismo turno. A propósito NO depende de que la
+  // transferencia se haya elegido justo EN ESTE turno (bug real reportado:
+  // el cliente la eligió en el mismo mensaje en que el domicilio todavía
+  // tenía un problema sin resolver, y como esa elección nunca contó como
+  // "nueva" en un turno posterior ya sin problemas, los datos bancarios no
+  // se mandaban nunca) — alcanza con que el pedido esté en transferencia,
+  // no se le hayan mandado todavía para ESTA elección puntual
+  // (bankDetailsSent, que se resetea cada vez que el medio de pago cambia
+  // de verdad), y no quede nada más pendiente en este turno.
+  if (draft.paymentMethod === "TRANSFER" && !draft.bankDetailsSent && correctionNotes.length === 0) {
+    const paymentConfig = await prisma.paymentMethodConfig.findUnique({ where: { branchId: params.branchId } });
+    if (paymentConfig) {
+      extras.push({ kind: "text", text: buildPaymentInfoMessage(paymentConfig) });
+      draft.bankDetailsSent = true;
+    }
+  }
+
+  // Red de seguridad final: el "Estado actual del pedido" en el prompt (ver
+  // engine-prompt.ts) ya le dice a la IA en cada turno qué dato falta, pero
+  // hubo un caso real donde igual armó una respuesta que sonaba a que el
+  // pedido ya estaba completo (se concentró en resolver el domicilio, que
+  // había fallado antes, y nunca volvió a pedir el nombre) — sin llegar a
+  // confirmar nada (confirm_order sigue bloqueado en código si falta un
+  // dato), pero dejando al cliente con la idea de que no faltaba nada. Si al
+  // terminar el turno el pedido quedó A UN SOLO dato de estar completo — el
+  // momento en que más suena a que ya terminó — nos aseguramos de que el
+  // cliente se entere de forma confiable, sin depender de que la IA se haya
+  // acordado de pedirlo en su propio texto. Antes de "productos" (que recién
+  // se empieza a pedir) no aplica: ahí es normal y esperado que falten
+  // varios datos a la vez.
+  if (correctionNotes.length === 0 && draftChangedThisTurn) {
+    const missingAfterTurn = getMissingOrderFields(draft);
+    if (missingAfterTurn.length === 1 && missingAfterTurn[0] !== "productos") {
+      correctionNotes.push(
+        `¡Ya casi! Todavía me falta ${MISSING_FIELD_LABEL[missingAfterTurn[0]] ?? missingAfterTurn[0]} para poder armar tu pedido.`,
+      );
+    }
   }
 
   // Si el cliente hizo un cambio real sin intentar confirmar en el mismo

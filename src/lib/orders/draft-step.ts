@@ -143,6 +143,30 @@ export function extractExplicitPaymentMethodText(text: string): "CASH" | "TRANSF
   return match[1].toLowerCase().startsWith("efec") ? "CASH" : "TRANSFER";
 }
 
+// Bug real reportado: el cliente dio la dirección y el medio de pago EN EL
+// MISMO mensaje ("...1510, entre peron y barbieri. Transferencia"), la
+// dirección falló la validación, la IA se concentró en pedir de nuevo el
+// domicilio y nunca mandó "set_payment_method" — el dato se perdió del
+// todo, y el cliente tuvo que repetirlo varios mensajes más tarde
+// ("pago por transferencia te dije"). extractExplicitPaymentMethodText no
+// alcanza para este caso porque exige que el mensaje sea NADA MÁS que la
+// palabra — acá hay que mirar la última frase del mensaje (separada por
+// punto, exclamación o salto de línea), que es donde un cliente suele
+// "tirar" la respuesta a una pregunta anterior después de dar otro dato.
+// Mismo criterio estricto que la función de arriba (nada de texto extra en
+// ESA frase puntual) para no malinterpretar una negación como "no quiero
+// pagar por transferencia, prefiero efectivo" (ahí no hay una frase final
+// que sea nada más que una de las dos palabras).
+export function extractTrailingPaymentMethodMention(text: string): "CASH" | "TRANSFER" | null {
+  const segments = text
+    .split(/[.!¡\n]+/)
+    .map((segment) => segment.trim())
+    .filter(Boolean);
+  const lastSegment = segments[segments.length - 1];
+  if (!lastSegment) return null;
+  return extractExplicitPaymentMethodText(lastSegment);
+}
+
 // Bug real reportado (se repitió varias veces, cada vez por un lugar
 // distinto del código que tocaba draftOrder sin vaciarlo del todo): un
 // borrador abandonado a medio armar — ítems, domicilio o medio de pago de

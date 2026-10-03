@@ -34,6 +34,17 @@ export const draftOrderStateSchema = z.object({
   pendingAddressSuggestion: z
     .object({ formattedAddress: z.string(), latitude: z.number(), longitude: z.number() })
     .optional(),
+  // Bug real reportado: el cliente eligió transferencia en el mismo mensaje
+  // en que el domicilio todavía tenía un problema sin resolver — los datos
+  // bancarios se difieren a propósito hasta que no quede nada más pendiente
+  // en el turno (ver apply-actions.ts), pero una vez que el domicilio se
+  // resolvía en un turno POSTERIOR, nada volvía a intentar mandarlos: el
+  // cliente nunca los recibía. Esta bandera (en vez de "¿fue una elección
+  // nueva este turno?") hace que el envío sea idempotente por elección: se
+  // manda apenas sea posible, una sola vez por cada vez que el cliente
+  // elige transferencia, sin importar en qué turno termine quedando libre
+  // de otros problemas.
+  bankDetailsSent: z.boolean().optional(),
 });
 
 export type DraftOrderState = z.infer<typeof draftOrderStateSchema>;

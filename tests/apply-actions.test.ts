@@ -1667,3 +1667,188 @@ describe("applyActions — reconoce 'transferencia'/'efectivo' solos aunque la I
     expect(result.draft.paymentMethod).toBeUndefined();
   });
 });
+
+// Regresión del caso real reportado completo: el cliente dio la dirección y
+// el medio de pago en el mismo mensaje ("...1510, entre peron y barbieri.
+// Transferencia"), la dirección falló ese turno, y la IA nunca volvió a
+// pedir el nombre (que había quedado sin dar desde el principio) ni mandó
+// los datos bancarios — el cliente tuvo que repetir "pago por transferencia
+// te dije" varios mensajes después, y el resumen final nunca mencionó el
+// nombre.
+describe("applyActions — caso real: domicilio y medio de pago en el mismo mensaje, domicilio falla ese turno", () => {
+  const companiesToCleanup: string[] = [];
+
+  afterAll(async () => {
+    for (const companyId of companiesToCleanup) await cleanupCompany(companyId);
+  });
+
+  it("captura el medio de pago igual (sin mandar los datos bancarios todavía), y los manda recién cuando el domicilio se resuelve en un turno posterior — junto con el recordatorio del nombre, que seguía sin darse", async () => {
+    const { company, branch } = await createTestCompanyAndBranch();
+    companiesToCleanup.push(company.id);
+    await prisma.deliveryZone.create({
+      data: { companyId: company.id, branchId: branch.id, centerLatitude: -34.6083, centerLongitude: -58.3712, radiusKm: 5 },
+    });
+    const product = await prisma.product.create({
+      data: { companyId: company.id, branchId: branch.id, name: "Pizza muzzarella", priceCents: 450000 },
+    });
+    await prisma.paymentMethodConfig.create({
+      data: {
+        companyId: company.id,
+        branchId: branch.id,
+        cashEnabled: true,
+        transferEnabled: true,
+        transferAlias: "negocio.mp",
+        transferCbu: "0000000000000000000000",
+        transferHolder: "Negocio SA",
+      },
+    });
+    const conversation = await prisma.conversation.create({
+      data: { companyId: company.id, branchId: branch.id, customerPhone: "5491100000051" },
+    });
+
+    const draftFirstTurn = {
+      items: [{ productId: product.id, productName: product.name, unitPriceCents: product.priceCents, quantity: 1 }],
+      // El cliente nunca dio el nombre — exactamente como en el caso real.
+    };
+
+    // Primer turno: la IA solo extrae la dirección (la geocodificación
+    // falla, "ambiguous") y no manda set_payment_method, aunque el cliente
+    // haya dicho "Transferencia" al final del mismo mensaje.
+    geocodeAddressMock.mockResolvedValueOnce(null);
+    const first = await applyActions({
+      companyId: company.id,
+      branchId: branch.id,
+      conversationId: conversation.id,
+      customerPhone: "5491100000051",
+      draft: draftFirstTurn,
+      actions: [{ type: "set_customer_info", address: "cid guidi de franc 1510, entre peron y barbieri" }],
+      customerMessageText: "cid guidi de franc 1510, entre peron y barbieri. Transferencia",
+    });
+
+    expect(first.correctionNotes.some((note) => note.includes("No pude encontrar bien esa dirección"))).toBe(true);
+    // El medio de pago SÍ se capturó (gracias a extractTrailingPaymentMethodMention),
+    // pero los datos bancarios no se mandan todavía: el domicilio sigue roto.
+    expect(first.draft.paymentMethod).toBe("TRANSFER");
+    expect(first.draft.bankDetailsSent).toBeFalsy();
+    expect(
+      first.extras.some((extra) => extra.kind === "text" && extra.text.includes("estos son los datos de la cuenta")),
+    ).toBe(false);
+
+    // Segundo turno: el cliente repite la dirección, esta vez geocodifica
+    // bien. La IA no vuelve a mencionar el medio de pago (ya lo había dicho).
+    geocodeAddressMock.mockResolvedValueOnce({
+      latitude: -34.6083,
+      longitude: -58.3712,
+      formattedAddress: "Cid Guidi de Franc 1510, Buenos Aires, Argentina",
+      partialMatch: false,
+      isPreciseMatch: true,
+      hasStreetNumber: true,
+      fromCache: false,
+    });
+    const second = await applyActions({
+      companyId: company.id,
+      branchId: branch.id,
+      conversationId: conversation.id,
+      customerPhone: "5491100000051",
+      draft: first.draft,
+      actions: [{ type: "set_customer_info", address: "cid guidi de franc 1510" }],
+      customerMessageText: "cid guidi de franc 1510",
+    });
+
+    expect(second.draft.deliveryLatitude).toBeDefined();
+    // Ahora sí: los datos bancarios se mandan (primera vez que no queda
+    // ningún otro problema pendiente desde que el cliente eligió transferencia).
+    expect(
+      second.extras.some((extra) => extra.kind === "text" && extra.text.includes("estos son los datos de la cuenta")),
+    ).toBe(true);
+    expect(second.draft.bankDetailsSent).toBe(true);
+    // Y como ya no queda más que UN dato pendiente (el nombre, que nunca se
+    // dio), el sistema se lo recuerda de forma confiable en vez de dejar
+    // que la IA se olvide — el bug real reportado.
+    expect(second.correctionNotes.some((note) => note.includes("tu nombre"))).toBe(true);
+  });
+});
+
+// Regresión del "recordatorio final": aunque "Estado actual del pedido" en
+// el prompt ya le dice a la IA qué dato falta en cada turno, hubo un caso
+// real donde igual armó una respuesta que sonaba a pedido completo mientras
+// el nombre seguía sin darse. Esta es la red de seguridad en código: si al
+// terminar el turno falta exactamente UN dato (no "productos", que es
+// normal al principio), se le avisa al cliente de forma determinística.
+describe("applyActions — recuerda el último dato pendiente cuando el pedido queda a uno solo de estar completo", () => {
+  const companiesToCleanup: string[] = [];
+
+  afterAll(async () => {
+    for (const companyId of companiesToCleanup) await cleanupCompany(companyId);
+  });
+
+  it("avisa que falta el nombre si domicilio y medio de pago ya están, y nombre se completó recién ahora en otro campo (ej. domicilio)", async () => {
+    const { company, branch } = await createTestCompanyAndBranch();
+    companiesToCleanup.push(company.id);
+    await prisma.deliveryZone.create({
+      data: { companyId: company.id, branchId: branch.id, centerLatitude: -34.6083, centerLongitude: -58.3712, radiusKm: 5 },
+    });
+    const product = await prisma.product.create({
+      data: { companyId: company.id, branchId: branch.id, name: "Pizza muzzarella", priceCents: 450000 },
+    });
+    await prisma.paymentMethodConfig.create({
+      data: { companyId: company.id, branchId: branch.id, cashEnabled: true, transferEnabled: true },
+    });
+    const conversation = await prisma.conversation.create({
+      data: { companyId: company.id, branchId: branch.id, customerPhone: "5491100000052" },
+    });
+
+    const draft = {
+      items: [{ productId: product.id, productName: product.name, unitPriceCents: product.priceCents, quantity: 1 }],
+      paymentMethod: "CASH" as const,
+      cashPaymentAmountCents: 500000,
+      // Nombre y domicilio todavía no dados.
+    };
+
+    geocodeAddressMock.mockResolvedValueOnce({
+      latitude: -34.6083,
+      longitude: -58.3712,
+      formattedAddress: "Falsa 123, Buenos Aires, Argentina",
+      partialMatch: false,
+      isPreciseMatch: true,
+      hasStreetNumber: true,
+      fromCache: false,
+    });
+
+    const result = await applyActions({
+      companyId: company.id,
+      branchId: branch.id,
+      conversationId: conversation.id,
+      customerPhone: "5491100000052",
+      draft,
+      actions: [{ type: "set_customer_info", address: "Falsa 123" }],
+      customerMessageText: "mi domicilio es Falsa 123",
+    });
+
+    expect(result.correctionNotes.some((note) => note.includes("tu nombre"))).toBe(true);
+  });
+
+  it("no avisa nada todavía si faltan varios datos a la vez (no es engañoso, la IA sigue preguntando como corresponde)", async () => {
+    const { company, branch } = await createTestCompanyAndBranch();
+    companiesToCleanup.push(company.id);
+    await prisma.product.create({
+      data: { companyId: company.id, branchId: branch.id, name: "Pizza muzzarella", priceCents: 450000 },
+    });
+
+    const conversation = await prisma.conversation.create({
+      data: { companyId: company.id, branchId: branch.id, customerPhone: "5491100000053" },
+    });
+
+    const result = await applyActions({
+      companyId: company.id,
+      branchId: branch.id,
+      conversationId: conversation.id,
+      customerPhone: "5491100000053",
+      draft: EMPTY_DRAFT_ORDER,
+      actions: [{ type: "add_item", productName: "Pizza muzzarella", quantity: 1 }],
+      customerMessageText: "una de muzza por favor",
+    });
+
+    expect(result.correctionNotes).toHaveLength(0);
+  });
+});
