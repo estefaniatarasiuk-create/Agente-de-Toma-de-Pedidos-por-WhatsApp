@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireBranchContext } from "@/lib/branch-context";
 import { conversationStatusSchema } from "@/lib/validations/order-actions";
+import { shouldClearDraftOnHandoverToAI } from "@/lib/orders/draft-step";
 
 export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
   const context = await requireBranchContext();
@@ -37,14 +38,19 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   const conversation = await prisma.conversation.findFirst({ where: { id, branchId: context.branchId } });
   if (!conversation) return NextResponse.json({ error: "Conversación no encontrada." }, { status: 404 });
 
-  // Al resolver una conversación que necesitaba atención, se limpia
-  // cualquier borrador que hubiera quedado (normalmente ya está vacío —
-  // engine.ts lo limpia al escalar — salvo en el caso de un pedido
-  // adicional pendiente de sumar a mano, ver apply-actions.ts: ahí SÍ se
-  // preserva a propósito para que el panel lo muestre). Si no se limpiara
-  // acá, esos ítems ya sumados a mano podrían resucitar solos en el
-  // próximo pedido que arme la IA.
-  const isResolving = conversation.status === "REQUIRES_ATTENTION" && parsed.data.status === "ACTIVE";
+  // Al devolverle el control a la IA (desde "necesita atención" o desde
+  // "pausada" — ej. alguien usó "Hablar con el cliente" y después
+  // "Reactivar IA"), se limpia cualquier borrador que hubiera quedado.
+  // Normalmente ya está vacío (engine.ts lo limpia al escalar), salvo en
+  // el caso de un pedido adicional pendiente de sumar a mano (ver
+  // apply-actions.ts: ahí SÍ se preserva a propósito para que el panel lo
+  // muestre) — o, en "pausada", cualquier cosa que haya quedado mientras
+  // una persona charlaba directo con el cliente, que la IA no puede saber
+  // si sigue siendo válida. Bug real reportado: sin esto, un borrador
+  // abandonado durante una pausa (AI_PAUSED → ACTIVE, que antes NO
+  // limpiaba nada) resucitaba solo en el próximo pedido sin relación que
+  // armara la IA, sumando productos que el cliente nunca pidió.
+  const isResolving = shouldClearDraftOnHandoverToAI(conversation.status, parsed.data.status);
 
   const updated = await prisma.conversation.update({
     where: { id: conversation.id },

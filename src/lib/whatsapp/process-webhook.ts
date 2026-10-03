@@ -83,8 +83,16 @@ async function processMessagesChange(value: WebhookChangeValue): Promise<void> {
 
     // Si estaba cerrada, un mensaje nuevo la reabre. Si un humano la pausó o
     // la marcó "requiere atención", eso lo maneja la Fase 4: no lo pisamos acá.
+    // Bug real reportado: reabrir sin vaciar el borrador dejaba ítems de un
+    // pedido viejo, nunca confirmado, listos para sumarse solos al
+    // siguiente pedido que arme la IA — una conversación cerrada representa
+    // una interacción que ya terminó, así que un mensaje nuevo arranca de
+    // cero, igual que "quiero pedir" (ver isNewOrderIntentText en engine.ts).
     if (conversation.status === "CLOSED") {
-      await prisma.conversation.update({ where: { id: conversation.id }, data: { status: "ACTIVE" } });
+      await prisma.conversation.update({
+        where: { id: conversation.id },
+        data: { status: "ACTIVE", draftOrder: { items: [] }, currentStep: null },
+      });
     }
 
     const alreadyProcessed = await prisma.message.findUnique({ where: { whatsappMessageId: message.id } });

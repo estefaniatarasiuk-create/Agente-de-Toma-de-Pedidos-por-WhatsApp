@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isNewOrderIntentText, looksLikeConfirmationText } from "@/lib/orders/draft-step";
+import { isNewOrderIntentText, looksLikeConfirmationText, shouldClearDraftOnHandoverToAI } from "@/lib/orders/draft-step";
 
 describe("isNewOrderIntentText", () => {
   it("detecta frases típicas de arrancar un pedido nuevo", () => {
@@ -43,5 +43,24 @@ describe("looksLikeConfirmationText", () => {
     expect(looksLikeConfirmationText("de una")).toBe(true);
     expect(looksLikeConfirmationText("sipi")).toBe(true);
     expect(looksLikeConfirmationText("sisi")).toBe(true);
+  });
+});
+
+// Regresión de un bug real: devolverle el control a la IA desde "pausada"
+// (AI_PAUSED → ACTIVE, ej. "Hablar con el cliente" y después "Reactivar
+// IA") no vaciaba el borrador de la conversación — un ítem/domicilio que
+// hubiera quedado de antes de la pausa resucitaba solo en el próximo
+// pedido sin relación que armara la IA.
+describe("shouldClearDraftOnHandoverToAI", () => {
+  it("vacía el borrador al volver de 'necesita atención' o de 'pausada'", () => {
+    expect(shouldClearDraftOnHandoverToAI("REQUIRES_ATTENTION", "ACTIVE")).toBe(true);
+    expect(shouldClearDraftOnHandoverToAI("AI_PAUSED", "ACTIVE")).toBe(true);
+  });
+
+  it("no vacía nada si no se vuelve a ACTIVE, o si ya estaba activa", () => {
+    expect(shouldClearDraftOnHandoverToAI("ACTIVE", "AI_PAUSED")).toBe(false);
+    expect(shouldClearDraftOnHandoverToAI("ACTIVE", "ACTIVE")).toBe(false);
+    expect(shouldClearDraftOnHandoverToAI("REQUIRES_ATTENTION", "AI_PAUSED")).toBe(false);
+    expect(shouldClearDraftOnHandoverToAI("CLOSED", "ACTIVE")).toBe(false);
   });
 });

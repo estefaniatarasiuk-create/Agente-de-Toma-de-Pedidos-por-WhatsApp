@@ -1,4 +1,17 @@
+import type { ConversationStatus } from "@prisma/client";
 import type { DraftOrderState } from "@/lib/validations/order-engine";
+
+// Al devolverle el control de una conversación a la IA — desde "necesita
+// atención" (una persona la marcó resuelta) o desde "pausada" (ej. alguien
+// usó "Hablar con el cliente" y después "Reactivar IA") — cualquier
+// borrador que hubiera quedado tiene que vaciarse. Bug real reportado: el
+// caso "pausada → activa" no limpiaba nada, así que un borrador abandonado
+// mientras una persona charlaba directo con el cliente (ítems, domicilio,
+// lo que fuera) resucitaba solo en el próximo pedido sin relación que
+// armara la IA, sumando datos que el cliente nunca dio para ESE pedido.
+export function shouldClearDraftOnHandoverToAI(currentStatus: ConversationStatus, newStatus: ConversationStatus): boolean {
+  return (currentStatus === "REQUIRES_ATTENTION" || currentStatus === "AI_PAUSED") && newStatus === "ACTIVE";
+}
 
 // Nombres legibles de los campos que puede faltar para completar un pedido.
 // Compartido entre create-order.ts (mensaje de "missing_info") y
