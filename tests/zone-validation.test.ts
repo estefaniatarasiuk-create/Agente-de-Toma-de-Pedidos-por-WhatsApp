@@ -83,11 +83,15 @@ describe("validateDeliveryAddress", () => {
     expect(result.status).toBe("ok");
   });
 
-  // Regresión de un bug real: un cruce de calles sin altura ("Namuncura y
-  // Barbieri") geocodificaba como coincidencia precisa (la calle existe y
-  // está en zona) y se aceptaba como domicilio válido, aunque no tuviera
-  // ningún número de puerta con el que el repartidor pudiera entregar.
-  it("pide la altura si la calle es precisa y está en zona, pero sin número de puerta (solo un cruce de calles)", async () => {
+  // Regresión de un bug real: el cliente SÍ escribió una altura ("cid
+  // guidi de fran 1510", con un typo en la calle), pero Google no pudo
+  // confirmar un número de puerta real sobre esa calle — devolver
+  // "missing_house_number" ahí generaba un loop sin salida (le pedíamos la
+  // altura de nuevo, el cliente la repetía, el typo de la calle seguía sin
+  // corregirse). Como el cliente YA escribió un dígito, el problema real
+  // es la calle, no la altura — "ambiguous" pide la dirección COMPLETA de
+  // nuevo, que sí puede romper el loop.
+  it("pide la dirección completa de nuevo (no solo la altura) si el cliente ya escribió un número pero Google no confirma la altura", async () => {
     const { company, branch } = await createTestCompanyAndBranch();
     companiesToCleanup.push(company.id);
     await prisma.deliveryZone.create({
@@ -110,12 +114,8 @@ describe("validateDeliveryAddress", () => {
       fromCache: false,
     });
 
-    // El texto incluye un número (ej. el cliente puso una referencia de
-    // altura vaga) para llegar hasta la geocodificación y ejercitar el
-    // chequeo basado en la respuesta de Google — el chequeo por texto (sin
-    // NINGÚN dígito) se prueba aparte, más abajo.
     const result = await validateDeliveryAddress(branch.id, "namuncura y barbieri, cerca del 1500");
-    expect(result.status).toBe("missing_house_number");
+    expect(result.status).toBe("ambiguous");
   });
 
   // El otro lado del mismo chequeo: si el cliente no escribió NI UN dígito,

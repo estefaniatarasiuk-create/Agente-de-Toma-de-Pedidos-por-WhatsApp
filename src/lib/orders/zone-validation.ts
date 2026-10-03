@@ -124,12 +124,18 @@ export async function validateDeliveryAddress(
     return { status: "out_of_zone", distanceKm: distance, radiusKm: zone.radiusKm };
   }
 
-  // La calle es correcta y está en zona, pero sin una altura puntual (ej.
-  // el cliente dio un cruce de calles) no hay con qué número de puerta
-  // entregar — bug real reportado: esto se aceptaba en silencio como
-  // dirección válida.
+  // Si llegamos hasta acá, el chequeo de arriba (línea 44) ya garantiza que
+  // el texto del cliente SÍ tiene al menos un dígito. Si encima de eso
+  // Google no pudo confirmar una altura real sobre esa calle, lo más
+  // probable NO es que "falte la altura" (el cliente ya la dio) — es que
+  // la calle esté mal escrita o incompleta y Google haya resuelto a una
+  // coincidencia parcial sin poder ubicar el número ahí. Bug real
+  // reportado: devolver "missing_house_number" en este caso hacía un loop
+  // sin salida (le pedíamos el número de nuevo, el cliente lo repetía, el
+  // typo de la calle seguía sin corregirse). "ambiguous" pide la dirección
+  // COMPLETA de nuevo, que sí puede romper el loop.
   if (!geocoded.hasStreetNumber) {
-    return { status: "missing_house_number" };
+    return { status: "ambiguous" };
   }
 
   return {
