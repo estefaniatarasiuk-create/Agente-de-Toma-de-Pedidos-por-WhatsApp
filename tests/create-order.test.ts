@@ -184,6 +184,7 @@ describe("createOrderFromDraft — no duplica un pedido reciente con los mismos 
       deliveryLatitude: -34.6,
       deliveryLongitude: -58.38,
       paymentMethod: "CASH" as const,
+      cashPaymentAmountCents: 1000000,
     };
 
     const first = await createOrderFromDraft({

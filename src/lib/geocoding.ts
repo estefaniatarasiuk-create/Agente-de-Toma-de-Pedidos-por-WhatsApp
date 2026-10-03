@@ -62,6 +62,14 @@ export type GeocodeResult = {
   // resultado así NUNCA debería aceptarse ni sugerirse como si fuera la
   // dirección puntual del cliente — ver el chequeo en zone-validation.ts.
   isPreciseMatch: boolean;
+  // Bug real reportado: una dirección sin altura ("Namuncura y Barbieri",
+  // solo el cruce de calles) geocodificó como coincidencia "precisa" (tipo
+  // "route", calle encontrada sin número) y el pedido se aceptó sin la
+  // altura — el repartidor no tiene con qué número de puerta entregar. Esto
+  // es independiente de "isPreciseMatch" (que solo dice si se encontró LA
+  // CALLE correcta): acá se distingue si el resultado de Google incluye un
+  // número de puerta puntual (componente "street_number").
+  hasStreetNumber: boolean;
 };
 
 const PRECISE_RESULT_TYPES = new Set(["street_address", "premise", "subpremise", "route"]);
@@ -76,6 +84,7 @@ type GoogleGeocodeResponse = {
     formatted_address: string;
     partial_match?: boolean;
     types?: string[];
+    address_components?: Array<{ types: string[] }>;
     geometry: { location: { lat: number; lng: number } };
   }>;
 };
@@ -113,9 +122,11 @@ export async function geocodeAddress(
       longitude: cached.longitude,
       formattedAddress: cached.formattedAddress ?? cached.rawAddress,
       partialMatch: false,
-      // Solo se cachean resultados precisos (ver más abajo), así que
-      // cualquier entrada en la cache es, por construcción, precisa.
+      // Solo se cachean resultados precisos Y con número de puerta (ver más
+      // abajo), así que cualquier entrada en la cache es, por construcción,
+      // precisa y con altura.
       isPreciseMatch: true,
+      hasStreetNumber: true,
       fromCache: true,
     };
   }
@@ -152,12 +163,17 @@ export async function geocodeAddress(
   const bestResult = data.results[0];
   const isAmbiguous = data.results.length > 1 || Boolean(bestResult.partial_match);
   const isPreciseMatch = isPreciseGeocodeResult(bestResult.types);
+  const hasStreetNumber = (bestResult.address_components ?? []).some((component) =>
+    component.types.includes("street_number"),
+  );
 
-  // No cachear resultados "a nivel de localidad" — son la respuesta de
-  // Google cuando no encontró la calle puntual, y cachearlos haría que una
-  // dirección mal escrita quede "pegada" para siempre a solo el centro de
-  // la ciudad en vez de volver a intentar geocodificarla bien más adelante.
-  if (isPreciseMatch) {
+  // No cachear resultados "a nivel de localidad" ni sin número de puerta —
+  // en ambos casos no es una dirección puntual completa todavía (la primera
+  // porque Google no encontró la calle; la segunda porque encontró la calle
+  // pero no una altura específica, ej. solo un cruce de calles), y
+  // cachearla haría que una dirección incompleta quede "pegada" para
+  // siempre en vez de volver a intentar geocodificarla bien más adelante.
+  if (isPreciseMatch && hasStreetNumber) {
     await prisma.addressCache.create({
       data: {
         normalizedAddress,
@@ -176,6 +192,7 @@ export async function geocodeAddress(
     formattedAddress: bestResult.formatted_address,
     partialMatch: isAmbiguous,
     isPreciseMatch,
+    hasStreetNumber,
     fromCache: false,
   };
 }

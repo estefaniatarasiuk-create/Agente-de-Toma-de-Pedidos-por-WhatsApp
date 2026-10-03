@@ -386,6 +386,9 @@ export function OrderDetailPanel({
                 <h3 className="text-xs font-semibold uppercase text-gray-600">Pago</h3>
                 <p className="mt-1 text-sm text-gray-800">
                   {order.paymentMethod === "CASH" ? "Efectivo" : "Transferencia"}
+                  {order.paymentMethod === "CASH" && order.cashPaymentAmountCents !== null
+                    ? ` — paga con ${formatCentsAsArs(order.cashPaymentAmountCents)}`
+                    : ""}
                   {order.paymentMethod === "CASH" && order.changeAmountCents !== null && order.changeAmountCents > 0
                     ? ` (vuelto: ${formatCentsAsArs(order.changeAmountCents)})`
                     : ""}

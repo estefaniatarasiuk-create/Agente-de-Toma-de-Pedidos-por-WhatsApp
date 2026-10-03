@@ -44,6 +44,7 @@ describe("validateDeliveryAddress", () => {
       formattedAddress: "Córdoba, Argentina",
       partialMatch: false,
       isPreciseMatch: true,
+      hasStreetNumber: true,
       fromCache: false,
     });
 
@@ -74,11 +75,43 @@ describe("validateDeliveryAddress", () => {
       formattedAddress: "Av. de Mayo 700, CABA",
       partialMatch: false,
       isPreciseMatch: true,
+      hasStreetNumber: true,
       fromCache: false,
     });
 
     const result = await validateDeliveryAddress(branch.id, "Av. de Mayo 700");
     expect(result.status).toBe("ok");
+  });
+
+  // Regresión de un bug real: un cruce de calles sin altura ("Namuncura y
+  // Barbieri") geocodificaba como coincidencia precisa (la calle existe y
+  // está en zona) y se aceptaba como domicilio válido, aunque no tuviera
+  // ningún número de puerta con el que el repartidor pudiera entregar.
+  it("pide la altura si la calle es precisa y está en zona, pero sin número de puerta (solo un cruce de calles)", async () => {
+    const { company, branch } = await createTestCompanyAndBranch();
+    companiesToCleanup.push(company.id);
+    await prisma.deliveryZone.create({
+      data: {
+        companyId: company.id,
+        branchId: branch.id,
+        centerLatitude: ZONE_CENTER.latitude,
+        centerLongitude: ZONE_CENTER.longitude,
+        radiusKm: ZONE_CENTER.radiusKm,
+      },
+    });
+
+    geocodeAddressMock.mockResolvedValueOnce({
+      latitude: -34.611,
+      longitude: -58.3745,
+      formattedAddress: "Vicente Barbieri & Ceferino Namuncurá, CABA, Argentina",
+      partialMatch: false,
+      isPreciseMatch: true,
+      hasStreetNumber: false,
+      fromCache: false,
+    });
+
+    const result = await validateDeliveryAddress(branch.id, "namuncura y barbieri");
+    expect(result.status).toBe("missing_house_number");
   });
 
   it("devuelve zone_not_configured si la sucursal no tiene zona cargada", async () => {
@@ -112,6 +145,7 @@ describe("validateDeliveryAddress", () => {
       formattedAddress: "Córdoba Province, Argentina",
       partialMatch: false,
       isPreciseMatch: false,
+      hasStreetNumber: true,
       fromCache: false,
     });
     reverseGeocodeLocalityMock.mockResolvedValueOnce("Villa Centenario");
@@ -126,10 +160,53 @@ describe("validateDeliveryAddress", () => {
       formattedAddress: "Villa Centenario, Buenos Aires Province, Argentina",
       partialMatch: false,
       isPreciseMatch: false,
+      hasStreetNumber: true,
       fromCache: false,
     });
 
     const result = await validateDeliveryAddress(branch.id, "guido de franco 1510");
+    expect(result.status).toBe("ambiguous");
+  });
+
+  it("no sugiere una corrección si el reintento encuentra la calle correcta pero sin altura", async () => {
+    const { company, branch } = await createTestCompanyAndBranch();
+    companiesToCleanup.push(company.id);
+    await prisma.deliveryZone.create({
+      data: {
+        companyId: company.id,
+        branchId: branch.id,
+        centerLatitude: ZONE_CENTER.latitude,
+        centerLongitude: ZONE_CENTER.longitude,
+        radiusKm: ZONE_CENTER.radiusKm,
+      },
+    });
+    const { reverseGeocodeLocality } = await import("@/lib/geocoding");
+    const reverseGeocodeLocalityMock = vi.mocked(reverseGeocodeLocality);
+
+    geocodeAddressMock.mockResolvedValueOnce({
+      latitude: -31.4201,
+      longitude: -64.1888,
+      formattedAddress: "Barbieri, Córdoba, Argentina",
+      partialMatch: false,
+      isPreciseMatch: false,
+      hasStreetNumber: false,
+      fromCache: false,
+    });
+    reverseGeocodeLocalityMock.mockResolvedValueOnce("Villa Centenario");
+    // El reintento restringido a la localidad encuentra la calle correcta,
+    // dentro de zona, pero sin una altura puntual (solo el cruce de
+    // calles) — no alcanza para proponerla como corrección completa.
+    geocodeAddressMock.mockResolvedValueOnce({
+      latitude: -34.61,
+      longitude: -58.3745,
+      formattedAddress: "Vicente Barbieri & Ceferino Namuncurá, Villa Centenario, Argentina",
+      partialMatch: false,
+      isPreciseMatch: true,
+      hasStreetNumber: false,
+      fromCache: false,
+    });
+
+    const result = await validateDeliveryAddress(branch.id, "barbieri");
     expect(result.status).toBe("ambiguous");
   });
 

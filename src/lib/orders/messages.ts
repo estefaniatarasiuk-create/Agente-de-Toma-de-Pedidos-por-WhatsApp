@@ -106,6 +106,13 @@ export function buildAmbiguousAddressMessage(): string {
   return "No pude encontrar bien esa dirección. ¿Me pasás la calle, altura, y entre qué calles está (entrecalles) o el barrio?";
 }
 
+// Bug real reportado: un cruce de calles sin número ("Namuncura y
+// Barbieri") se aceptaba como domicilio válido — el repartidor necesita un
+// número de puerta puntual para poder entregar.
+export function buildMissingHouseNumberMessage(): string {
+  return "Encontré la calle, pero me falta la altura (el número de la puerta). ¿Me la pasás?";
+}
+
 export function buildZoneNotConfiguredMessage(): string {
   return "Por ahora no podemos validar domicilios de entrega, estamos terminando de configurar la zona. ¡Escribinos en un rato!";
 }

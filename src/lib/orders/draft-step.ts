@@ -10,6 +10,7 @@ export const MISSING_FIELD_LABEL: Record<string, string> = {
   nombre: "tu nombre",
   "domicilio validado": "tu domicilio de entrega",
   "medio de pago": "cómo vas a pagar",
+  "monto de efectivo": "con cuánto efectivo vas a pagar",
 };
 
 // Misma lista de campos requeridos que usa create-order.ts para decidir si
@@ -21,6 +22,17 @@ export function getMissingOrderFields(draft: DraftOrderState): string[] {
   if (!draft.customerName) missing.push("nombre");
   if (!draft.deliveryAddressRaw || draft.deliveryLatitude === undefined) missing.push("domicilio validado");
   if (!draft.paymentMethod) missing.push("medio de pago");
+  // Bug real reportado: un pedido en efectivo se confirmó sin que el
+  // cliente hubiera dado nunca el monto con el que iba a pagar — la IA
+  // intentó confirmar en el mismo turno en el que el cliente respondía esa
+  // pregunta, sin llegar a capturarla como "cashAmount", y como el medio de
+  // pago ya estaba establecido ("Efectivo" a secas cuenta como dato
+  // completo), nada bloqueaba la confirmación. El pedido quedó sin vuelto
+  // calculable y sin mostrar el monto en el tablero. Exigir este dato antes
+  // de poder confirmar, igual que cualquier otro dato faltante.
+  if (draft.paymentMethod === "CASH" && draft.cashPaymentAmountCents === undefined) {
+    missing.push("monto de efectivo");
+  }
   return missing;
 }
 
@@ -66,6 +78,6 @@ export function computeCurrentStep(draft: DraftOrderState): string | null {
   }
   const missing = getMissingOrderFields(draft);
   if (missing.includes("nombre") || missing.includes("domicilio validado")) return "ASKING_DELIVERY_INFO";
-  if (missing.includes("medio de pago")) return "ASKING_PAYMENT_METHOD";
+  if (missing.includes("medio de pago") || missing.includes("monto de efectivo")) return "ASKING_PAYMENT_METHOD";
   return "CONFIRMING";
 }

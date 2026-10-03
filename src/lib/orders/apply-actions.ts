@@ -11,6 +11,7 @@ import {
   buildAmbiguousAddressMessage,
   buildFullOrderSummary,
   buildGeocodingUnavailableMessage,
+  buildMissingHouseNumberMessage,
   buildOrderConfirmedMessage,
   buildOutOfZoneMessage,
   buildPaymentInfoMessage,
@@ -237,6 +238,8 @@ export async function applyActions(params: {
           );
         } else if (validation.status === "ambiguous") {
           correctionNotes.push(buildAmbiguousAddressMessage());
+        } else if (validation.status === "missing_house_number") {
+          correctionNotes.push(buildMissingHouseNumberMessage());
         } else if (validation.status === "geocoding_unavailable") {
           correctionNotes.push(buildGeocodingUnavailableMessage());
           requiresHumanForTechnicalFailure = true;

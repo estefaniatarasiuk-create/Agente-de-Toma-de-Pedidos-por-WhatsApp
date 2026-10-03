@@ -7,6 +7,11 @@ export type AddressValidationResult =
   | { status: "ambiguous" }
   | { status: "zone_not_configured" }
   | { status: "geocoding_unavailable" }
+  // Se encontró la calle (y está en zona), pero sin un número de puerta
+  // puntual (ej. el cliente solo dio un cruce de calles, "Namuncura y
+  // Barbieri") — ver el bug real reportado en geocoding.ts. Distinto de
+  // "ambiguous": acá SÍ sabemos qué calle es, solo falta la altura.
+  | { status: "missing_house_number" }
   // Ni "fuera de zona" ni válida directamente: la primera pasada dio fuera
   // de zona, pero restringiendo la búsqueda a la localidad del local SÍ
   // encontramos algo parecido dentro del radio. En vez de aceptarla en
@@ -70,7 +75,11 @@ export async function validateDeliveryAddress(
         // entera — como si fuera la dirección puntual del cliente). Un
         // resultado así nunca es una sugerencia válida, sea cual sea la
         // distancia: exigimos que sea preciso a nivel de calle.
-        if (retryGeocoded?.isPreciseMatch) {
+        // También exigimos número de puerta acá: si el reintento solo
+        // encuentra el cruce de calles (sin altura), no es una sugerencia
+        // completa — cae al "ambiguous" de abajo, que ya le pide al cliente
+        // la altura explícitamente.
+        if (retryGeocoded?.isPreciseMatch && retryGeocoded.hasStreetNumber) {
           const retryDistance = distanceKm(
             { latitude: zone.centerLatitude, longitude: zone.centerLongitude },
             { latitude: retryGeocoded.latitude, longitude: retryGeocoded.longitude },
@@ -100,6 +109,14 @@ export async function validateDeliveryAddress(
     }
 
     return { status: "out_of_zone", distanceKm: distance, radiusKm: zone.radiusKm };
+  }
+
+  // La calle es correcta y está en zona, pero sin una altura puntual (ej.
+  // el cliente dio un cruce de calles) no hay con qué número de puerta
+  // entregar — bug real reportado: esto se aceptaba en silencio como
+  // dirección válida.
+  if (!geocoded.hasStreetNumber) {
+    return { status: "missing_house_number" };
   }
 
   return {

@@ -45,6 +45,7 @@ describe("applyActions — set_customer_info fuera de zona", () => {
       formattedAddress: "Córdoba, Argentina",
       partialMatch: false,
       isPreciseMatch: true,
+      hasStreetNumber: true,
       fromCache: false,
     });
 
@@ -105,6 +106,7 @@ describe("applyActions — propone una corrección de domicilio en vez de rechaz
       formattedAddress: "Guidi de Franc, Córdoba, Argentina",
       partialMatch: false,
       isPreciseMatch: true,
+      hasStreetNumber: true,
       fromCache: false,
     });
     reverseGeocodeLocalityMock.mockResolvedValueOnce("Villa Centenario");
@@ -116,6 +118,7 @@ describe("applyActions — propone una corrección de domicilio en vez de rechaz
       formattedAddress: "Cid Guidi de Franc 1510, Villa Centenario, Argentina",
       partialMatch: false,
       isPreciseMatch: true,
+      hasStreetNumber: true,
       fromCache: false,
     });
 
@@ -272,6 +275,7 @@ describe("applyActions — add_item fija el total, no lo suma, y protege la conf
       deliveryLatitude: -34.6,
       deliveryLongitude: -58.38,
       paymentMethod: "CASH" as const,
+      cashPaymentAmountCents: 3000000,
     };
 
     // El modelo "restatea" el pedido (mismo total: 9) en el mismo turno
@@ -316,6 +320,7 @@ describe("applyActions — add_item fija el total, no lo suma, y protege la conf
       deliveryLatitude: -34.6,
       deliveryLongitude: -58.38,
       paymentMethod: "CASH" as const,
+      cashPaymentAmountCents: 3000000,
     };
 
     const result = await applyActions({
@@ -367,6 +372,7 @@ describe("applyActions — un pedido nuevo nunca hereda ítems de uno previo ya 
       deliveryLatitude: -34.6,
       deliveryLongitude: -58.38,
       paymentMethod: "CASH" as const,
+      cashPaymentAmountCents: 3000000,
     };
 
     const firstResult = await applyActions({
@@ -444,7 +450,7 @@ describe("applyActions — confirm_order exige un turno aparte del que completó
       conversationId: conversation.id,
       customerPhone: "5491100000005",
       draft: draftMissingPayment,
-      actions: [{ type: "set_payment_method", method: "CASH" }, { type: "confirm_order" }],
+      actions: [{ type: "set_payment_method", method: "CASH", cashAmount: 20000 }, { type: "confirm_order" }],
     });
 
     expect(result.orderCreated).toBe(false);
@@ -698,6 +704,7 @@ describe("applyActions — el domicilio validado no se vuelve a contar como camb
       formattedAddress: "Av. de Mayo 700, CABA",
       partialMatch: false,
       isPreciseMatch: true,
+      hasStreetNumber: true,
       fromCache: false,
     });
     const first = await applyActions({
@@ -736,6 +743,7 @@ describe("applyActions — el domicilio validado no se vuelve a contar como camb
       deliveryLatitude: -34.61,
       deliveryLongitude: -58.3745,
       paymentMethod: "CASH" as const,
+      cashPaymentAmountCents: 500000,
     };
 
     // Mismo lugar (coordenadas casi idénticas), redactado distinto — no
@@ -746,6 +754,7 @@ describe("applyActions — el domicilio validado no se vuelve a contar como camb
       formattedAddress: "Av. de Mayo 700, CABA",
       partialMatch: false,
       isPreciseMatch: true,
+      hasStreetNumber: true,
       fromCache: false,
     });
     const result = await applyActions({
@@ -796,6 +805,7 @@ describe("applyActions — no confirma si el cliente no dijo nada que suene a un
       deliveryLatitude: -34.6,
       deliveryLongitude: -58.38,
       paymentMethod: "CASH" as const,
+      cashPaymentAmountCents: 1000000,
     };
 
     const result = await applyActions({
@@ -836,6 +846,7 @@ describe("applyActions — no confirma si el cliente no dijo nada que suene a un
       deliveryLatitude: -34.6,
       deliveryLongitude: -58.38,
       paymentMethod: "CASH" as const,
+      cashPaymentAmountCents: 1000000,
     };
 
     const result = await applyActions({
@@ -993,6 +1004,7 @@ describe("applyActions — deriva a un humano en vez de duplicar el pedido si el
       deliveryLatitude: -34.6,
       deliveryLongitude: -58.38,
       paymentMethod: "CASH" as const,
+      cashPaymentAmountCents: 300000,
     };
 
     const result = await applyActions({
@@ -1119,6 +1131,7 @@ describe("applyActions — no manda los datos bancarios si queda un problema sin
       formattedAddress: "Barbieri, Córdoba, Argentina",
       partialMatch: false,
       isPreciseMatch: true,
+      hasStreetNumber: true,
       fromCache: false,
     });
     reverseGeocodeLocalityMock.mockResolvedValueOnce("Villa Centenario");
@@ -1128,6 +1141,7 @@ describe("applyActions — no manda los datos bancarios si queda un problema sin
       formattedAddress: "Barbieri y Namuncurá, Villa Centenario, Argentina",
       partialMatch: false,
       isPreciseMatch: true,
+      hasStreetNumber: true,
       fromCache: false,
     });
 
@@ -1219,5 +1233,166 @@ describe("applyActions — no manda los datos bancarios si queda un problema sin
     expect(
       second.extras.some((extra) => extra.kind === "text" && extra.text.includes("estos son los datos de la cuenta")),
     ).toBe(false);
+  });
+});
+
+// Regresión de un bug real reportado: el cliente dio un cruce de calles sin
+// altura ("namuncura y barbieri") y el sistema lo aceptó como domicilio
+// válido, sin pedir nunca el número de puerta — el repartidor no tenía con
+// qué número entregar.
+describe("applyActions — set_customer_info con un cruce de calles sin altura", () => {
+  const companiesToCleanup: string[] = [];
+
+  afterAll(async () => {
+    for (const companyId of companiesToCleanup) await cleanupCompany(companyId);
+  });
+
+  it("pide la altura en vez de aceptar el domicilio, y no deja confirmar el pedido", async () => {
+    const { company, branch } = await createTestCompanyAndBranch();
+    companiesToCleanup.push(company.id);
+    await prisma.deliveryZone.create({
+      data: { companyId: company.id, branchId: branch.id, centerLatitude: -34.6083, centerLongitude: -58.3712, radiusKm: 5 },
+    });
+    const product = await prisma.product.create({
+      data: { companyId: company.id, branchId: branch.id, name: "Chipa", priceCents: 300000 },
+    });
+    await prisma.paymentMethodConfig.create({
+      data: { companyId: company.id, branchId: branch.id, cashEnabled: true, transferEnabled: true },
+    });
+    const conversation = await prisma.conversation.create({
+      data: { companyId: company.id, branchId: branch.id, customerPhone: "5491100000042" },
+    });
+
+    geocodeAddressMock.mockResolvedValueOnce({
+      latitude: -34.61,
+      longitude: -58.3745,
+      formattedAddress: "Vicente Barbieri & Ceferino Namuncurá, Villa Centenario, Argentina",
+      partialMatch: false,
+      isPreciseMatch: true,
+      hasStreetNumber: false,
+      fromCache: false,
+    });
+
+    const draft = {
+      items: [{ productId: product.id, productName: product.name, unitPriceCents: product.priceCents, quantity: 1 }],
+      customerName: "Estefania",
+    };
+
+    const result = await applyActions({
+      companyId: company.id,
+      branchId: branch.id,
+      conversationId: conversation.id,
+      customerPhone: "5491100000042",
+      draft,
+      actions: [{ type: "set_customer_info", address: "namuncura y barbieri" }],
+    });
+
+    expect(result.draft.deliveryAddressRaw).toBeUndefined();
+    expect(result.draft.pendingAddressSuggestion).toBeUndefined();
+    expect(result.correctionNotes.some((note) => note.includes("me falta la altura"))).toBe(true);
+    expect(result.orderCreated).toBe(false);
+  });
+});
+
+// Regresión de un bug real reportado: el cliente eligió efectivo, respondió
+// "10" a la pregunta de con cuánto iba a pagar, pero la IA no capturó ese
+// número como "cashAmount" e igual intentó confirmar el pedido — se
+// registró (en otro intento posterior) sin ningún monto de efectivo, sin
+// poder calcular vuelto ni mostrarlo en el tablero de pedidos.
+describe("applyActions — no confirma un pedido en efectivo sin el monto con el que paga", () => {
+  const companiesToCleanup: string[] = [];
+
+  afterAll(async () => {
+    for (const companyId of companiesToCleanup) await cleanupCompany(companyId);
+  });
+
+  it("bloquea confirm_order y pide el monto de efectivo si method es CASH sin cashAmount", async () => {
+    const { company, branch } = await createTestCompanyAndBranch();
+    companiesToCleanup.push(company.id);
+    const product = await prisma.product.create({
+      data: { companyId: company.id, branchId: branch.id, name: "Chipa", priceCents: 300000 },
+    });
+    await prisma.paymentMethodConfig.create({
+      data: { companyId: company.id, branchId: branch.id, cashEnabled: true, transferEnabled: true },
+    });
+    const conversation = await prisma.conversation.create({
+      data: { companyId: company.id, branchId: branch.id, customerPhone: "5491100000043" },
+    });
+
+    const draft = {
+      items: [{ productId: product.id, productName: product.name, unitPriceCents: product.priceCents, quantity: 1 }],
+      customerName: "Estefania",
+      deliveryAddressRaw: "Calle Falsa 123",
+      deliveryLatitude: -34.6,
+      deliveryLongitude: -58.38,
+      paymentMethod: "CASH" as const,
+      // cashPaymentAmountCents nunca se cargó — igual que en el caso real.
+    };
+
+    const result = await applyActions({
+      companyId: company.id,
+      branchId: branch.id,
+      conversationId: conversation.id,
+      customerPhone: "5491100000043",
+      draft,
+      actions: [{ type: "confirm_order" }],
+      customerMessageText: "10",
+    });
+
+    expect(result.orderCreated).toBe(false);
+    expect(result.correctionNotes.some((note) => note.includes("con cuánto efectivo vas a pagar"))).toBe(true);
+    const orders = await prisma.order.findMany({ where: { branchId: branch.id } });
+    expect(orders).toHaveLength(0);
+  });
+
+  it("permite confirmar una vez que se captura el monto de efectivo, y lo guarda en el pedido", async () => {
+    const { company, branch } = await createTestCompanyAndBranch();
+    companiesToCleanup.push(company.id);
+    const product = await prisma.product.create({
+      data: { companyId: company.id, branchId: branch.id, name: "Chipa", priceCents: 300000 },
+    });
+    await prisma.paymentMethodConfig.create({
+      data: { companyId: company.id, branchId: branch.id, cashEnabled: true, transferEnabled: true },
+    });
+    const conversation = await prisma.conversation.create({
+      data: { companyId: company.id, branchId: branch.id, customerPhone: "5491100000044" },
+    });
+
+    const draftReady = {
+      items: [{ productId: product.id, productName: product.name, unitPriceCents: product.priceCents, quantity: 1 }],
+      customerName: "Estefania",
+      deliveryAddressRaw: "Calle Falsa 123",
+      deliveryLatitude: -34.6,
+      deliveryLongitude: -58.38,
+      paymentMethod: "CASH" as const,
+    };
+
+    // Turno en el que el cliente responde "10.000" a la pregunta de con
+    // cuánto va a pagar: la IA captura el monto en el mismo turno.
+    const first = await applyActions({
+      companyId: company.id,
+      branchId: branch.id,
+      conversationId: conversation.id,
+      customerPhone: "5491100000044",
+      draft: draftReady,
+      actions: [{ type: "set_payment_method", method: "CASH", cashAmount: 10000 }],
+      customerMessageText: "10.000",
+    });
+    expect(first.draft.cashPaymentAmountCents).toBe(1000000);
+
+    const second = await applyActions({
+      companyId: company.id,
+      branchId: branch.id,
+      conversationId: conversation.id,
+      customerPhone: "5491100000044",
+      draft: first.draft,
+      actions: [{ type: "confirm_order" }],
+      customerMessageText: "confirmo",
+    });
+
+    expect(second.orderCreated).toBe(true);
+    const orders = await prisma.order.findMany({ where: { branchId: branch.id, customerPhone: "5491100000044" } });
+    expect(orders).toHaveLength(1);
+    expect(orders[0].cashPaymentAmountCents).toBe(1000000);
   });
 });
