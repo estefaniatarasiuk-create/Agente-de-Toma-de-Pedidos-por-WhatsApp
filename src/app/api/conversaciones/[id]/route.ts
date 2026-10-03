@@ -56,7 +56,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     where: { id: conversation.id },
     data: {
       status: parsed.data.status,
-      ...(isResolving ? { draftOrder: { items: [] }, currentStep: null } : {}),
+      ...(isResolving ? { draftOrder: { items: [] }, draftOrderUpdatedAt: new Date(), currentStep: null } : {}),
     },
   });
 

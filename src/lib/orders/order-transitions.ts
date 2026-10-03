@@ -233,7 +233,7 @@ export async function updateOrderItems(params: {
     if (params.resolvesPendingDraft && order.conversationId) {
       await tx.conversation.update({
         where: { id: order.conversationId },
-        data: { draftOrder: { items: [] }, currentStep: null },
+        data: { draftOrder: { items: [] }, draftOrderUpdatedAt: new Date(), currentStep: null },
       });
     }
     return updatedOrder;

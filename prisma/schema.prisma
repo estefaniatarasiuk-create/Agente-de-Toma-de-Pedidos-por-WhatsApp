@@ -322,6 +322,19 @@ model Conversation {
   // cero contra el catálogo vigente (nunca se confía en el número que trae
   // el borrador ni en lo que "diga" el modelo).
   draftOrder    Json?
+  // Última vez que se escribió draftOrder (vacío o no). Respaldo
+  // independiente del job de BullMQ que vence la conversación por
+  // inactividad (ver conversation-expiry en jobs/queues.ts): ese job
+  // depende de que el worker esté corriendo y de que se haya programado
+  // para ESTE borrador puntual — si cualquiera de los varios lugares del
+  // código que tocan draftOrder tiene un gap no detectado (ya pasó varias
+  // veces: ver isDraftStale en draft-step.ts), un borrador abandonado podía
+  // quedar vivo para siempre y sus ítems resucitar solos en un pedido
+  // futuro sin relación. Se chequea en código, en cada turno, sin depender
+  // de ningún job: si pasaron más de los minutos de vencimiento de la
+  // sucursal desde la última escritura, el borrador se descarta antes de
+  // seguir, sin importar por qué nadie lo había limpiado antes.
+  draftOrderUpdatedAt DateTime?
   lastMessageAt DateTime           @default(now())
 
   createdAt DateTime @default(now())

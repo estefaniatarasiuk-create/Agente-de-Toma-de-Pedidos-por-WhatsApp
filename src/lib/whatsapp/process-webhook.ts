@@ -91,7 +91,7 @@ async function processMessagesChange(value: WebhookChangeValue): Promise<void> {
     if (conversation.status === "CLOSED") {
       await prisma.conversation.update({
         where: { id: conversation.id },
-        data: { status: "ACTIVE", draftOrder: { items: [] }, currentStep: null },
+        data: { status: "ACTIVE", draftOrder: { items: [] }, draftOrderUpdatedAt: new Date(), currentStep: null },
       });
     }
 

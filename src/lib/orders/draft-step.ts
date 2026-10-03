@@ -107,8 +107,12 @@ export function looksLikeConfirmationText(text: string): boolean {
 // Compartido entre engine.ts (para guardar Conversation.currentStep) y
 // apply-actions.ts (para exigir que confirm_order llegue en un turno
 // aparte del que completó el último dato — ver ese archivo).
+export function isDraftEmpty(draft: DraftOrderState): boolean {
+  return draft.items.length === 0 && !draft.customerName && !draft.deliveryAddressRaw && !draft.paymentMethod;
+}
+
 export function computeCurrentStep(draft: DraftOrderState): string | null {
-  if (draft.items.length === 0 && !draft.customerName && !draft.deliveryAddressRaw && !draft.paymentMethod) {
+  if (isDraftEmpty(draft)) {
     return null;
   }
   const missing = getMissingOrderFields(draft);
@@ -137,4 +141,31 @@ export function extractExplicitPaymentMethodText(text: string): "CASH" | "TRANSF
   const match = EXPLICIT_PAYMENT_METHOD_RE.exec(text.trim());
   if (!match) return null;
   return match[1].toLowerCase().startsWith("efec") ? "CASH" : "TRANSFER";
+}
+
+// Bug real reportado (se repitió varias veces, cada vez por un lugar
+// distinto del código que tocaba draftOrder sin vaciarlo del todo): un
+// borrador abandonado a medio armar — ítems, domicilio o medio de pago de
+// un intento de pedido que el cliente nunca terminó ni confirmó — podía
+// quedar vivo indefinidamente y resucitar solo en un pedido futuro sin
+// relación, sumando productos que el cliente nunca pidió en esa conversación.
+// Cada vez que apareció, la solución fue encontrar Y PARCHEAR el lugar
+// puntual que no limpiaba el borrador al cambiar de estado — pero no hay
+// forma de garantizar que esos sean TODOS los lugares posibles (y el job de
+// BullMQ que vence la conversación por inactividad depende de que el worker
+// esté corriendo). Este chequeo es la red de seguridad final, independiente
+// de cuál haya sido la causa: si pasaron más minutos que el vencimiento
+// configurado desde la última vez que se escribió el borrador, se lo trata
+// como abandonado y se descarta ANTES de seguir — sin importar qué parte
+// del código (conocida o no) fue la responsable de no limpiarlo antes.
+export function isDraftStale(params: {
+  draft: DraftOrderState;
+  draftOrderUpdatedAt: Date | null;
+  expiryMinutes: number;
+  now?: Date;
+}): boolean {
+  if (isDraftEmpty(params.draft)) return false;
+  if (!params.draftOrderUpdatedAt) return false;
+  const now = params.now ?? new Date();
+  return now.getTime() - params.draftOrderUpdatedAt.getTime() > params.expiryMinutes * 60_000;
 }

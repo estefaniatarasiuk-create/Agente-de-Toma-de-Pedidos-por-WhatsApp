@@ -1,10 +1,13 @@
 import { describe, it, expect } from "vitest";
 import {
   extractExplicitPaymentMethodText,
+  isDraftEmpty,
+  isDraftStale,
   isNewOrderIntentText,
   looksLikeConfirmationText,
   shouldClearDraftOnHandoverToAI,
 } from "@/lib/orders/draft-step";
+import { EMPTY_DRAFT_ORDER, type DraftOrderState } from "@/lib/validations/order-engine";
 
 describe("isNewOrderIntentText", () => {
   it("detecta frases típicas de arrancar un pedido nuevo", () => {
@@ -88,5 +91,85 @@ describe("extractExplicitPaymentMethodText", () => {
     expect(extractExplicitPaymentMethodText("no quiero pagar por transferencia, prefiero efectivo")).toBeNull();
     expect(extractExplicitPaymentMethodText("con transferencia está bien")).toBeNull();
     expect(extractExplicitPaymentMethodText("una pizza muzzarella porfa")).toBeNull();
+  });
+});
+
+describe("isDraftEmpty", () => {
+  it("un borrador recién creado está vacío", () => {
+    expect(isDraftEmpty(EMPTY_DRAFT_ORDER)).toBe(true);
+  });
+
+  it("cualquier dato real lo deja de considerar vacío", () => {
+    expect(isDraftEmpty({ items: [{ productId: "1", productName: "Pizza", unitPriceCents: 100, quantity: 1 }] })).toBe(
+      false,
+    );
+    expect(isDraftEmpty({ items: [], customerName: "Juan" })).toBe(false);
+    expect(isDraftEmpty({ items: [], deliveryAddressRaw: "Calle 123" })).toBe(false);
+    expect(isDraftEmpty({ items: [], paymentMethod: "CASH" })).toBe(false);
+  });
+});
+
+// Regresión del "borrador fantasma": el bug de ítems que resucitaban solos
+// en un pedido nuevo se reportó y se "arregló" tres veces seguidas, cada vez
+// parchando un lugar puntual del código que no vaciaba el borrador al
+// cambiar de estado (resolvesPendingDraft, AI_PAUSED→ACTIVE, CLOSED→ACTIVE)
+// — y volvió a pasar una cuarta vez, con la conversación activa todo el
+// tiempo (ningún cambio de estado de por medio). isDraftStale es la red de
+// seguridad final: no importa POR QUÉ nadie limpió el borrador, si pasó más
+// tiempo que el vencimiento configurado desde la última escritura, se lo
+// descarta antes de seguir.
+describe("isDraftStale", () => {
+  const draftConItems: DraftOrderState = {
+    items: [{ productId: "1", productName: "Pizza muzzarella", unitPriceCents: 450000, quantity: 1 }],
+    deliveryAddressRaw: "Prof Cid Guidi de Franc 1510",
+  };
+
+  it("un borrador vacío nunca es 'viejo' (no hay nada que descartar)", () => {
+    expect(
+      isDraftStale({
+        draft: EMPTY_DRAFT_ORDER,
+        draftOrderUpdatedAt: new Date("2026-01-01T00:00:00Z"),
+        expiryMinutes: 30,
+        now: new Date("2026-06-01T00:00:00Z"),
+      }),
+    ).toBe(false);
+  });
+
+  it("sin fecha de última escritura, no se asume viejo (dato legado antes de esta protección)", () => {
+    expect(
+      isDraftStale({ draft: draftConItems, draftOrderUpdatedAt: null, expiryMinutes: 30, now: new Date() }),
+    ).toBe(false);
+  });
+
+  it("un borrador recién tocado, aunque tenga datos, no es viejo", () => {
+    const now = new Date("2026-03-10T12:30:00Z");
+    const draftOrderUpdatedAt = new Date("2026-03-10T12:15:00Z"); // hace 15 min
+    expect(isDraftStale({ draft: draftConItems, draftOrderUpdatedAt, expiryMinutes: 30, now })).toBe(false);
+  });
+
+  it("caso real reportado: un pedido sin confirmar (pizza + domicilio) sigue vivo pasado el vencimiento configurado, sin que la conversación haya cambiado de estado nunca — se descarta", () => {
+    const now = new Date("2026-03-10T13:00:00Z");
+    const draftOrderUpdatedAt = new Date("2026-03-10T12:00:00Z"); // hace 60 min
+    expect(isDraftStale({ draft: draftConItems, draftOrderUpdatedAt, expiryMinutes: 30, now })).toBe(true);
+  });
+
+  it("justo en el límite todavía no es viejo; un instante después sí", () => {
+    const draftOrderUpdatedAt = new Date("2026-03-10T12:00:00Z");
+    expect(
+      isDraftStale({
+        draft: draftConItems,
+        draftOrderUpdatedAt,
+        expiryMinutes: 30,
+        now: new Date("2026-03-10T12:30:00Z"),
+      }),
+    ).toBe(false);
+    expect(
+      isDraftStale({
+        draft: draftConItems,
+        draftOrderUpdatedAt,
+        expiryMinutes: 30,
+        now: new Date("2026-03-10T12:30:01Z"),
+      }),
+    ).toBe(true);
   });
 });

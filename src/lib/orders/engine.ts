@@ -12,7 +12,7 @@ import { extractJsonBlock, type LlmMessage } from "@/lib/ai/provider";
 import { draftOrderStateSchema, llmTurnResponseSchema, EMPTY_DRAFT_ORDER } from "@/lib/validations/order-engine";
 import { buildRequiresHumanMessage } from "@/lib/orders/messages";
 import { scheduleConversationExpiry } from "@/lib/jobs/queues";
-import { computeCurrentStep, isNewOrderIntentText } from "@/lib/orders/draft-step";
+import { computeCurrentStep, isDraftStale, isNewOrderIntentText } from "@/lib/orders/draft-step";
 import { findReusableReceiptMediaUrl } from "@/lib/orders/receipt-reuse";
 import { recordOrderReceipt } from "@/lib/orders/order-receipts";
 import { withConversationLock } from "@/lib/orders/conversation-lock";
@@ -68,6 +68,22 @@ async function processInboundMessageLocked(params: { conversationId: string; mes
   let draft = draftOrderStateSchema.safeParse(conversation.draftOrder).success
     ? draftOrderStateSchema.parse(conversation.draftOrder)
     : EMPTY_DRAFT_ORDER;
+
+  // Red de seguridad final contra el bug recurrente del "borrador fantasma"
+  // (ver isDraftStale en draft-step.ts): sin importar qué parte del código
+  // haya fallado en limpiarlo, un borrador que no se tocó en más de los
+  // minutos de vencimiento configurados se descarta acá, en código, en cada
+  // turno — no depende de que el job de BullMQ se haya programado ni de que
+  // el worker esté corriendo.
+  if (
+    isDraftStale({
+      draft,
+      draftOrderUpdatedAt: conversation.draftOrderUpdatedAt,
+      expiryMinutes: conversation.branch.conversationExpiryMinutes,
+    })
+  ) {
+    draft = { items: [] };
+  }
 
   // Bug real: un pedido anterior abandonado sin confirmar (bloqueado, o
   // simplemente sin cerrar) dejaba sus ítems/domicilio/pago en el borrador
@@ -231,7 +247,7 @@ async function processInboundMessageLocked(params: { conversationId: string; mes
         await sendText("¡Recibimos tu comprobante! Ya lo estamos verificando y en breve pasa a preparación.");
         await prisma.conversation.update({
           where: { id: conversation.id },
-          data: { draftOrder: confirmResult.draft as unknown as object, currentStep: null },
+          data: { draftOrder: confirmResult.draft as unknown as object, draftOrderUpdatedAt: new Date(), currentStep: null },
         });
         return;
       }
@@ -249,6 +265,7 @@ async function processInboundMessageLocked(params: { conversationId: string; mes
           data: {
             status: "REQUIRES_ATTENTION",
             draftOrder: confirmResult.preserveDraftOnEscalation ? (confirmResult.draft as unknown as object) : { items: [] },
+            draftOrderUpdatedAt: new Date(),
             currentStep: confirmResult.preserveDraftOnEscalation ? computeCurrentStep(confirmResult.draft) : null,
           },
         });
@@ -299,7 +316,7 @@ async function processInboundMessageLocked(params: { conversationId: string; mes
     // terminar queda flotando por si la conversación se reactiva después.
     await prisma.conversation.update({
       where: { id: conversation.id },
-      data: { status: "REQUIRES_ATTENTION", draftOrder: { items: [] }, currentStep: null },
+      data: { status: "REQUIRES_ATTENTION", draftOrder: { items: [] }, draftOrderUpdatedAt: new Date(), currentStep: null },
     });
     await sendText(buildRequiresHumanMessage());
     return;
@@ -339,6 +356,7 @@ async function processInboundMessageLocked(params: { conversationId: string; mes
       data: {
         status: "REQUIRES_ATTENTION",
         draftOrder: preserveDraftOnEscalation ? (updatedDraft as unknown as object) : { items: [] },
+        draftOrderUpdatedAt: new Date(),
         currentStep: preserveDraftOnEscalation ? computeCurrentStep(updatedDraft) : null,
       },
     });
@@ -395,6 +413,7 @@ async function processInboundMessageLocked(params: { conversationId: string; mes
     where: { id: conversation.id },
     data: {
       draftOrder: orderCreated ? { items: [] } : (updatedDraft as unknown as object),
+      draftOrderUpdatedAt: new Date(),
       currentStep: nextStep,
     },
   });

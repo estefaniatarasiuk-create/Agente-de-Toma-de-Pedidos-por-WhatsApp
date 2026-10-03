@@ -87,7 +87,7 @@ export async function processConversationExpiryJob(
 
   await prisma.conversation.update({
     where: { id: conversation.id },
-    data: { draftOrder: { items: [] }, currentStep: null },
+    data: { draftOrder: { items: [] }, draftOrderUpdatedAt: new Date(), currentStep: null },
   });
 
   const line = await findLineForBranch(conversation.branchId);
