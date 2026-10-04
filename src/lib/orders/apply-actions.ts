@@ -14,6 +14,7 @@ import {
   extractTrailingPaymentMethodMention,
   getMissingOrderFields,
   looksLikeConfirmationText,
+  looksLikeDeclinedMoreItemsText,
   MISSING_FIELD_LABEL,
 } from "@/lib/orders/draft-step";
 import {
@@ -528,6 +529,8 @@ export async function applyActions(params: {
   // acordado de pedirlo en su propio texto. Antes de "productos" (que recién
   // se empieza a pedir) no aplica: ahí es normal y esperado que falten
   // varios datos a la vez.
+  const attemptedConfirmThisTurn = params.actions.some((action) => action.type === "confirm_order");
+
   if (correctionNotes.length === 0 && draftChangedThisTurn) {
     const missingAfterTurn = getMissingOrderFields(draft);
     if (missingAfterTurn.length === 1 && missingAfterTurn[0] !== "productos") {
@@ -537,11 +540,30 @@ export async function applyActions(params: {
     }
   }
 
+  // Bug real reportado: con el pedido ya completo, la IA redacta su propio
+  // resumen en texto libre antes de pedir la confirmación — y en un caso
+  // real ese resumen mostró una cantidad y un total que NO coincidían con
+  // el pedido de verdad (18x Chipa/$54.000 cuando el pedido real tenía 6x
+  // Chipa/$18.000: la IA "recordó" mal, mezclando un pedido anterior ya
+  // entregado). El disparador fue que el cliente dijera "nada más" — sin
+  // ningún confirm_order de por medio, así que ninguna otra defensa de
+  // código corrió. Acá se reemplaza ese resumen por uno armado en código
+  // con los datos reales del borrador, igual que ya se hace cuando
+  // confirm_order se bloquea por un cambio en el mismo turno — nunca se
+  // confía en que el texto libre de la IA tenga los números bien.
+  if (
+    correctionNotes.length === 0 &&
+    !attemptedConfirmThisTurn &&
+    computeCurrentStep(draft) === "CONFIRMING" &&
+    (draftChangedThisTurn || looksLikeDeclinedMoreItemsText(params.customerMessageText ?? ""))
+  ) {
+    correctionNotes.push(`${buildFullOrderSummary(draft)}\n\n¿Confirmás este pedido?`);
+  }
+
   // Si el cliente hizo un cambio real sin intentar confirmar en el mismo
   // turno, está avanzando el pedido de forma normal, no rebotando contra un
   // confirm_order bloqueado — reiniciamos el contador para no derivar a un
   // humano por una racha de mensajes que no tienen nada que ver entre sí.
-  const attemptedConfirmThisTurn = params.actions.some((action) => action.type === "confirm_order");
   if (draftChangedThisTurn && !attemptedConfirmThisTurn && (draft.confirmAttempts ?? 0) > 0) {
     draft.confirmAttempts = 0;
   }

@@ -103,6 +103,22 @@ export function looksLikeConfirmationText(text: string): boolean {
   return CONFIRMATION_RE.test(text);
 }
 
+// Bug real: con el pedido completo, la IA arma su propio resumen en texto
+// libre antes de pedir confirmación — en un caso real ese resumen mostró
+// una cantidad y un total que NO coincidían con el pedido de verdad (18x
+// Chipa cuando el pedido real tenía 6x, "recordando" mal un pedido anterior
+// ya entregado). El disparador típico de ese resumen es que el cliente
+// diga que no quiere agregar nada más — se detecta en código para poder
+// reemplazar el resumen de la IA por uno armado con los datos reales (ver
+// apply-actions.ts), en vez de confiar en que el texto libre tenga los
+// números bien.
+const DECLINED_MORE_ITEMS_RE =
+  /\b(nada m[aá]s|no,?\s*nada|no\s+gracias|eso es todo|solo eso|nada por ahora|por ahora no|ning[uú]na?\s*m[aá]s)\b/i;
+
+export function looksLikeDeclinedMoreItemsText(text: string): boolean {
+  return DECLINED_MORE_ITEMS_RE.test(text);
+}
+
 // Paso vigente de la máquina de estados del pedido en curso (spec §3.2).
 // Compartido entre engine.ts (para guardar Conversation.currentStep) y
 // apply-actions.ts (para exigir que confirm_order llegue en un turno

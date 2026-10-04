@@ -2134,3 +2134,92 @@ describe("applyActions — add_item no deja que un producto se duplique por conf
     expect(result.draft.items[0].quantity).toBe(30);
   });
 });
+
+// Regresión de un bug real reportado: con el pedido ya completo, la IA
+// redacta su propio resumen en texto libre antes de pedir confirmación —
+// y mostró una cantidad y un total que NO coincidían con el pedido real
+// (18x Chipa/$54.000 cuando el pedido real tenía 6x Chipa/$18.000: "recordó"
+// mal, mezclando un pedido anterior ya entregado). El disparador fue que el
+// cliente dijera "nada más" sin ningún confirm_order de por medio. Acá se
+// prueba que, llegado ese punto, el resumen se arma siempre en código con
+// los datos reales del borrador — nunca se deja que el texto libre decida.
+describe("applyActions — arma el resumen en código (no en texto libre) cuando el pedido queda completo", () => {
+  const companiesToCleanup: string[] = [];
+
+  afterAll(async () => {
+    for (const companyId of companiesToCleanup) await cleanupCompany(companyId);
+  });
+
+  it("reemplaza la respuesta con el resumen real cuando el cliente dice que no quiere agregar nada más", async () => {
+    const { company, branch } = await createTestCompanyAndBranch();
+    companiesToCleanup.push(company.id);
+    const product = await prisma.product.create({
+      data: { companyId: company.id, branchId: branch.id, name: "Chipa", priceCents: 300000 },
+    });
+    const conversation = await prisma.conversation.create({
+      data: { companyId: company.id, branchId: branch.id, customerPhone: "5491100000059" },
+    });
+
+    const draft = {
+      items: [{ productId: product.id, productName: product.name, unitPriceCents: product.priceCents, quantity: 6 }],
+      customerName: "Estefanía",
+      deliveryAddressRaw: "Calle Falsa 123",
+      deliveryLatitude: -34.6,
+      deliveryLongitude: -58.38,
+      paymentMethod: "CASH" as const,
+      cashPaymentAmountCents: 4000000,
+    };
+
+    // El turno no trae ninguna acción (como pasó en el caso real: "nada
+    // más" no agrega ni cambia nada) — el pedido ya estaba completo antes
+    // de este turno también.
+    const result = await applyActions({
+      companyId: company.id,
+      branchId: branch.id,
+      conversationId: conversation.id,
+      customerPhone: "5491100000059",
+      draft,
+      actions: [],
+      customerMessageText: "nada más",
+    });
+
+    expect(result.correctionNotes.some((note) => note.includes("6x Chipa"))).toBe(true);
+    expect(result.correctionNotes.some((note) => note.includes(formatCentsAsArs(1800000)))).toBe(true);
+    expect(result.correctionNotes.some((note) => note.includes("18x Chipa"))).toBe(false);
+  });
+
+  it("también arma el resumen en código cuando el último dato se completa en este mismo turno", async () => {
+    const { company, branch } = await createTestCompanyAndBranch();
+    companiesToCleanup.push(company.id);
+    const product = await prisma.product.create({
+      data: { companyId: company.id, branchId: branch.id, name: "Chipa", priceCents: 300000 },
+    });
+    await prisma.paymentMethodConfig.create({
+      data: { companyId: company.id, branchId: branch.id, cashEnabled: true, transferEnabled: true },
+    });
+    const conversation = await prisma.conversation.create({
+      data: { companyId: company.id, branchId: branch.id, customerPhone: "5491100000060" },
+    });
+
+    const draft = {
+      items: [{ productId: product.id, productName: product.name, unitPriceCents: product.priceCents, quantity: 6 }],
+      customerName: "Estefanía",
+      deliveryAddressRaw: "Calle Falsa 123",
+      deliveryLatitude: -34.6,
+      deliveryLongitude: -58.38,
+    };
+
+    const result = await applyActions({
+      companyId: company.id,
+      branchId: branch.id,
+      conversationId: conversation.id,
+      customerPhone: "5491100000060",
+      draft,
+      actions: [{ type: "set_payment_method", method: "CASH", cashAmount: 40000 }],
+      customerMessageText: "40000",
+    });
+
+    expect(result.correctionNotes.some((note) => note.includes("6x Chipa"))).toBe(true);
+    expect(result.correctionNotes.some((note) => note.includes("¿Confirmás este pedido?"))).toBe(true);
+  });
+});

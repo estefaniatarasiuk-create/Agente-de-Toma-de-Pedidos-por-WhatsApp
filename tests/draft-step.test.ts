@@ -7,6 +7,7 @@ import {
   isDraftStale,
   isNewOrderIntentText,
   looksLikeConfirmationText,
+  looksLikeDeclinedMoreItemsText,
   shouldClearDraftOnHandoverToAI,
 } from "@/lib/orders/draft-step";
 import { EMPTY_DRAFT_ORDER, type DraftOrderState } from "@/lib/validations/order-engine";
@@ -223,5 +224,21 @@ describe("extractQuantityMentioned", () => {
     expect(extractQuantityMentioned("sisi, es esa")).toBeNull();
     expect(extractQuantityMentioned("Transferencia")).toBeNull();
     expect(extractQuantityMentioned("")).toBeNull();
+  });
+});
+
+describe("looksLikeDeclinedMoreItemsText", () => {
+  it("detecta las formas típicas de decir que no quiere agregar nada más", () => {
+    expect(looksLikeDeclinedMoreItemsText("nada más")).toBe(true);
+    expect(looksLikeDeclinedMoreItemsText("nada más, gracias")).toBe(true);
+    expect(looksLikeDeclinedMoreItemsText("no gracias")).toBe(true);
+    expect(looksLikeDeclinedMoreItemsText("eso es todo")).toBe(true);
+    expect(looksLikeDeclinedMoreItemsText("solo eso")).toBe(true);
+    expect(looksLikeDeclinedMoreItemsText("por ahora no")).toBe(true);
+  });
+
+  it("no confunde un pedido de producto con una respuesta de 'nada más'", () => {
+    expect(looksLikeDeclinedMoreItemsText("una pizza muzzarella porfa")).toBe(false);
+    expect(looksLikeDeclinedMoreItemsText("dale, mandame 2 cocas")).toBe(false);
   });
 });
