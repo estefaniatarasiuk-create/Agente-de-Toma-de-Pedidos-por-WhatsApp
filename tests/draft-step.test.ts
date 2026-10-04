@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   extractExplicitPaymentMethodText,
+  extractQuantityMentioned,
   extractTrailingPaymentMethodMention,
   isDraftEmpty,
   isDraftStale,
@@ -197,5 +198,30 @@ describe("isDraftStale", () => {
         now: new Date("2026-03-10T12:30:01Z"),
       }),
     ).toBe(true);
+  });
+});
+
+describe("extractQuantityMentioned", () => {
+  it("reconoce dígitos sueltos", () => {
+    expect(extractQuantityMentioned("quiero 12 chipas")).toBe(12);
+    expect(extractQuantityMentioned("mandame 2")).toBe(2);
+  });
+
+  it("reconoce docena y media docena (caso real: chipa se pide por docena)", () => {
+    expect(extractQuantityMentioned("una docena de chipa")).toBe(12);
+    expect(extractQuantityMentioned("Te pido una docena de chipa adicional")).toBe(12);
+    expect(extractQuantityMentioned("media docena nomás")).toBe(6);
+  });
+
+  it("reconoce números en palabras del uno al diez", () => {
+    expect(extractQuantityMentioned("una pizza porfa")).toBe(1);
+    expect(extractQuantityMentioned("dale, mandame dos")).toBe(2);
+    expect(extractQuantityMentioned("diez empanadas")).toBe(10);
+  });
+
+  it("devuelve null si no hay ningún número reconocible", () => {
+    expect(extractQuantityMentioned("sisi, es esa")).toBeNull();
+    expect(extractQuantityMentioned("Transferencia")).toBeNull();
+    expect(extractQuantityMentioned("")).toBeNull();
   });
 });

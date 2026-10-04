@@ -10,6 +10,7 @@ import {
   computeCurrentStep,
   computeDraftItemsTotalCents,
   extractExplicitPaymentMethodText,
+  extractQuantityMentioned,
   extractTrailingPaymentMethodMention,
   getMissingOrderFields,
   looksLikeConfirmationText,
@@ -140,48 +141,63 @@ export async function applyActions(params: {
       // las dudas en otro turno (algo que pasa seguido en la práctica),
       // no infle el pedido — fijar el mismo número de nuevo es un no-op.
       const existing = draft.items.find((item) => item.productId === product.id);
-      if (existing) {
-        // Bug real reportado: un cliente hizo DOS pedidos seguidos en la
-        // misma conversación, ambos de 12 Chipa — el primero ya confirmado,
-        // el segundo todavía armándose. En un turno donde el cliente no
-        // mencionó la Chipa ni ningún número (solo confirmaba el domicilio
-        // o el medio de pago), la IA reemitió "add_item" con 24 en vez de
-        // 12: el doble, exactamente la suma de los dos pedidos. Todo indica
-        // que confundió "este pedido" con el anterior (ambos visibles en el
-        // historial de la conversación) y sumó las cantidades solo. Si el
-        // AUMENTO propuesto coincide EXACTO con la cantidad de este mismo
-        // producto en un pedido RECIENTE de este cliente, es sospechoso:
-        // mejor ignorar el aumento (mantener lo que ya había) que arriesgar
-        // duplicar el pedido sin que el cliente lo haya pedido de verdad.
-        const proposedIncrease = action.quantity - existing.quantity;
-        const matchesRecentPastOrder =
-          proposedIncrease > 0
-            ? await prisma.orderItem.findFirst({
-                where: {
-                  productId: product.id,
-                  quantity: proposedIncrease,
-                  order: {
-                    branchId: params.branchId,
-                    customerPhone: params.customerPhone,
-                    createdAt: { gte: new Date(Date.now() - 2 * 60 * 60 * 1000) },
-                  },
-                },
-              })
-            : null;
-        if (matchesRecentPastOrder) {
-          console.warn(
-            `add_item ignorado: la IA intentó subir "${product.name}" de ${existing.quantity} a ${action.quantity} — ese aumento (${proposedIncrease}) coincide exacto con un pedido reciente de este mismo cliente, probable confusión con un pedido distinto.`,
-          );
-          continue;
+      const baselineQuantity = existing?.quantity ?? 0;
+      let finalQuantity = action.quantity;
+
+      // Bug real reportado DOS VECES, de dos formas distintas: un cliente
+      // pidió 12 Chipa, las confirmó, y poco después (misma conversación)
+      // pidió más Chipa — una vez como "¿algo más?" sobre un pedido todavía
+      // en curso (la IA reemitió add_item con 24 en vez de 12, sumando el
+      // pedido anterior), y otra vez como un pedido NUEVO después de marcar
+      // el primero "Entregado" ("te pido una docena de chipa adicional" →
+      // la IA respondió "el total ahora será de 24 chipa", de nuevo
+      // sumando el pedido anterior aunque ya estaba entregado). El panel
+      // (estado del pedido) no es lo que la IA mira — mira el historial de
+      // la conversación, y ahí los dos pedidos conviven sin distinción.
+      // Esta defensa cubre AMBAS formas: si la cantidad propuesta, restando
+      // la cantidad de este mismo producto en un pedido RECIENTE (últimas 2
+      // horas, sin importar su estado) de este cliente, da exactamente la
+      // cantidad que ya había en el borrador (quedó intacta, la IA solo
+      // "pegó" el pedido viejo encima) O exactamente el número que el
+      // cliente mencionó en ESTE mensaje (dígito, "una docena", "media
+      // docena", o un número en palabras), esa resta es casi seguro la
+      // cantidad real que el cliente pidió — se usa esa en vez de la que
+      // mandó la IA.
+      if (action.quantity > baselineQuantity) {
+        const recentPastOrder = await prisma.order.findFirst({
+          where: {
+            branchId: params.branchId,
+            customerPhone: params.customerPhone,
+            createdAt: { gte: new Date(Date.now() - 2 * 60 * 60 * 1000) },
+            items: { some: { productId: product.id } },
+          },
+          orderBy: { createdAt: "desc" },
+          include: { items: { where: { productId: product.id } } },
+        });
+        const recentPastOrderQuantity = recentPastOrder?.items[0]?.quantity;
+        if (recentPastOrderQuantity) {
+          const correctedQuantity = action.quantity - recentPastOrderQuantity;
+          const mentionedQuantity = extractQuantityMentioned(params.customerMessageText ?? "");
+          const correctionJustified =
+            correctedQuantity > 0 && (correctedQuantity === baselineQuantity || correctedQuantity === mentionedQuantity);
+          if (correctionJustified) {
+            console.warn(
+              `add_item corregido: la IA pidió "${product.name}" x${action.quantity}, pero eso coincide con sumar un pedido reciente de este cliente (x${recentPastOrderQuantity}) — se usa x${correctedQuantity} en su lugar.`,
+            );
+            finalQuantity = correctedQuantity;
+          }
         }
-        if (existing.quantity !== action.quantity) draftChangedThisTurn = true;
-        existing.quantity = action.quantity;
+      }
+
+      if (existing) {
+        if (existing.quantity !== finalQuantity) draftChangedThisTurn = true;
+        existing.quantity = finalQuantity;
       } else {
         draft.items.push({
           productId: product.id,
           productName: product.name,
           unitPriceCents: product.priceCents,
-          quantity: action.quantity,
+          quantity: finalQuantity,
         });
         draftChangedThisTurn = true;
       }

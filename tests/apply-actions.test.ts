@@ -2016,4 +2016,121 @@ describe("applyActions — add_item no deja que un producto se duplique por conf
 
     expect(result.draft.items[0].quantity).toBe(24);
   });
+
+  // Regresión del mismo bug reportado DE NUEVO, de una forma distinta: acá
+  // el pedido anterior ya estaba "Entregado" y el borrador arranca VACÍO
+  // (no hay "existing" al que subirle la cantidad) — el cliente pide un
+  // producto que ya había pedido antes, y la IA directamente propone el
+  // total sumado (24) como si fuera la primera vez que lo agrega.
+  it("corrige la cantidad inicial de un ítem NUEVO si coincide con sumar un pedido reciente (aunque ya esté 'Entregado')", async () => {
+    const { company, branch } = await createTestCompanyAndBranch();
+    companiesToCleanup.push(company.id);
+    const product = await prisma.product.create({
+      data: { companyId: company.id, branchId: branch.id, name: "Chipa", priceCents: 300000 },
+    });
+    const conversation = await prisma.conversation.create({
+      data: { companyId: company.id, branchId: branch.id, customerPhone: "5491100000057" },
+    });
+
+    await prisma.order.create({
+      data: {
+        companyId: company.id,
+        branchId: branch.id,
+        conversationId: conversation.id,
+        customerPhone: "5491100000057",
+        customerName: "Estefy",
+        deliveryAddressRaw: "Calle Falsa 123",
+        status: "DELIVERED",
+        deliveredAt: new Date(),
+        paymentMethod: "TRANSFER",
+        subtotalCents: 3600000,
+        totalCents: 3600000,
+        delayMinutesAtOrder: 40,
+        estimatedDeliveryAt: new Date(Date.now() - 10 * 60_000),
+        items: {
+          create: [
+            {
+              companyId: company.id,
+              branchId: branch.id,
+              productId: product.id,
+              productName: product.name,
+              unitPriceCents: product.priceCents,
+              quantity: 12,
+              subtotalCents: 3600000,
+            },
+          ],
+        },
+      },
+    });
+
+    // Borrador vacío (pedido nuevo) — la IA propone 24 directo, como pasó
+    // en el caso real ("el total ahora será de 24 chipa").
+    const result = await applyActions({
+      companyId: company.id,
+      branchId: branch.id,
+      conversationId: conversation.id,
+      customerPhone: "5491100000057",
+      draft: EMPTY_DRAFT_ORDER,
+      actions: [{ type: "add_item", productName: "Chipa", quantity: 24 }],
+      customerMessageText: "Te pido una docena de chipa adicional",
+    });
+
+    expect(result.draft.items).toEqual([
+      { productId: product.id, productName: product.name, unitPriceCents: product.priceCents, quantity: 12 },
+    ]);
+  });
+
+  it("no corrige nada si el cliente explícitamente pide una cantidad mayor (el número que dio manda)", async () => {
+    const { company, branch } = await createTestCompanyAndBranch();
+    companiesToCleanup.push(company.id);
+    const product = await prisma.product.create({
+      data: { companyId: company.id, branchId: branch.id, name: "Chipa", priceCents: 300000 },
+    });
+    const conversation = await prisma.conversation.create({
+      data: { companyId: company.id, branchId: branch.id, customerPhone: "5491100000058" },
+    });
+
+    await prisma.order.create({
+      data: {
+        companyId: company.id,
+        branchId: branch.id,
+        conversationId: conversation.id,
+        customerPhone: "5491100000058",
+        customerName: "Estefy",
+        deliveryAddressRaw: "Calle Falsa 123",
+        status: "DELIVERED",
+        deliveredAt: new Date(),
+        paymentMethod: "TRANSFER",
+        subtotalCents: 3600000,
+        totalCents: 3600000,
+        delayMinutesAtOrder: 40,
+        estimatedDeliveryAt: new Date(Date.now() - 10 * 60_000),
+        items: {
+          create: [
+            {
+              companyId: company.id,
+              branchId: branch.id,
+              productId: product.id,
+              productName: product.name,
+              unitPriceCents: product.priceCents,
+              quantity: 12,
+              subtotalCents: 3600000,
+            },
+          ],
+        },
+      },
+    });
+
+    const result = await applyActions({
+      companyId: company.id,
+      branchId: branch.id,
+      conversationId: conversation.id,
+      customerPhone: "5491100000058",
+      draft: EMPTY_DRAFT_ORDER,
+      actions: [{ type: "add_item", productName: "Chipa", quantity: 30 }],
+      customerMessageText: "quiero 30 chipas esta vez",
+    });
+
+    expect(result.draft.items[0].quantity).toBe(30);
+  });
 });

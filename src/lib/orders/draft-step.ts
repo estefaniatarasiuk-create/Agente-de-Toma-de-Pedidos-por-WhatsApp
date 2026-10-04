@@ -182,6 +182,40 @@ export function extractTrailingPaymentMethodMention(text: string): "CASH" | "TRA
 // configurado desde la última vez que se escribió el borrador, se lo trata
 // como abandonado y se descarta ANTES de seguir — sin importar qué parte
 // del código (conocida o no) fue la responsable de no limpiarlo antes.
+// Extrae, de forma barata y sin IA, el número que el cliente mencionó en su
+// mensaje — usada como respaldo en apply-actions.ts para confirmar si una
+// cantidad que propone la IA (ver el bug real ahí) coincide con lo que el
+// cliente realmente pidió EN ESTE mensaje. Cubre dígitos sueltos ("12"),
+// números en palabras ("una", "dos", ..., "diez") y las formas típicas en
+// que se pide chipa/facturas/etc. por docena ("una docena" = 12, "media
+// docena" = 6). No intenta entender la frase completa (si hay varios
+// números, no sabe a cuál se refiere) — es un respaldo de última instancia,
+// no un parser de lenguaje natural.
+const WORD_NUMBER_VALUES: Record<string, number> = {
+  un: 1,
+  una: 1,
+  dos: 2,
+  tres: 3,
+  cuatro: 4,
+  cinco: 5,
+  seis: 6,
+  siete: 7,
+  ocho: 8,
+  nueve: 9,
+  diez: 10,
+};
+const WORD_NUMBER_RE = /\b(un|una|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)\b/i;
+
+export function extractQuantityMentioned(text: string): number | null {
+  if (/\bmedia\s+docena\b/i.test(text)) return 6;
+  if (/\bdocena\b/i.test(text)) return 12;
+  const digitMatch = text.match(/\d+/);
+  if (digitMatch) return parseInt(digitMatch[0], 10);
+  const wordMatch = WORD_NUMBER_RE.exec(text);
+  if (wordMatch) return WORD_NUMBER_VALUES[wordMatch[1].toLowerCase()];
+  return null;
+}
+
 export function isDraftStale(params: {
   draft: DraftOrderState;
   draftOrderUpdatedAt: Date | null;

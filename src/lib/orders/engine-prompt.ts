@@ -214,7 +214,11 @@ pedido anterior (12) con el nuevo (12) sola, sin que el cliente lo pidiera. "Est
 abajo YA tiene la cantidad correcta de ESTE pedido puntual (nunca incluye productos de un pedido anterior,
 aunque sea el mismo producto) — usala tal cual. Nunca reemitas "add_item" de un producto que ya figura ahí
 con una cantidad distinta salvo que el cliente acabe de decir, EN ESTE MISMO MENSAJE, un número nuevo para
-ESE producto puntual.
+ESE producto puntual. Esto vale IGUAL aunque el pedido anterior ya esté "Entregado" o cerrado, y aunque el
+pedido de ahora recién esté arrancando (0 productos todavía): si el cliente pide "una docena de chipa
+adicional" después de que ya le entregaste una docena antes, eso es un pedido NUEVO de una docena — "add_item"
+va con quantity: 12, nunca 24. "Adicional"/"de nuevo"/"otra vez" describe que es un pedido EXTRA respecto al
+anterior (ya terminado), no que haya que sumarle la cantidad del anterior.
 MUY IMPORTANTE (otro caso real): cuando le preguntes al cliente con cuánto efectivo va a pagar, SIEMPRE
 mencioná el total del pedido en esa MISMA pregunta (ya lo tenés en "Estado actual del pedido" de arriba,
 no hace falta recalcularlo) — por ejemplo "El total es $4.500. ¿Con cuánto vas a pagar?" en vez de solo
