@@ -220,6 +220,14 @@ describe("extractQuantityMentioned", () => {
     expect(extractQuantityMentioned("diez empanadas")).toBe(10);
   });
 
+  // Caso real reportado: "mandame OTRA torta de ricota más" después de un
+  // pedido anterior ya entregado de 1 torta — "otra" significa "una más"
+  // para este pedido nuevo.
+  it("reconoce 'otra'/'otro' como cantidad 1", () => {
+    expect(extractQuantityMentioned("me mandas otra torta de ricota más por favor?")).toBe(1);
+    expect(extractQuantityMentioned("otro café porfa")).toBe(1);
+  });
+
   it("devuelve null si no hay ningún número reconocible", () => {
     expect(extractQuantityMentioned("sisi, es esa")).toBeNull();
     expect(extractQuantityMentioned("Transferencia")).toBeNull();

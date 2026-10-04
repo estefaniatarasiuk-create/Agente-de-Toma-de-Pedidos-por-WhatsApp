@@ -210,6 +210,15 @@ export function extractTrailingPaymentMethodMention(text: string): "CASH" | "TRA
 const WORD_NUMBER_VALUES: Record<string, number> = {
   un: 1,
   una: 1,
+  // Bug real reportado: "mandame OTRA torta de ricota más" después de un
+  // pedido anterior ya entregado de 1 torta — "otra" significa "una más"
+  // (cantidad 1 para ESTE pedido nuevo), no un número sin resolver. Sin
+  // este caso, extractQuantityMentioned devolvía null acá y la corrección
+  // de apply-actions.ts no tenía con qué confirmar que la cantidad real
+  // era 1, dejando pasar el "2" que la IA propuso (sumado con el pedido
+  // anterior) sin corregir.
+  otra: 1,
+  otro: 1,
   dos: 2,
   tres: 3,
   cuatro: 4,
@@ -220,7 +229,7 @@ const WORD_NUMBER_VALUES: Record<string, number> = {
   nueve: 9,
   diez: 10,
 };
-const WORD_NUMBER_RE = /\b(un|una|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)\b/i;
+const WORD_NUMBER_RE = /\b(un|una|otra|otro|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)\b/i;
 
 export function extractQuantityMentioned(text: string): number | null {
   if (/\bmedia\s+docena\b/i.test(text)) return 6;

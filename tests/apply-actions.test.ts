@@ -2222,4 +2222,108 @@ describe("applyActions — arma el resumen en código (no en texto libre) cuando
     expect(result.correctionNotes.some((note) => note.includes("6x Chipa"))).toBe(true);
     expect(result.correctionNotes.some((note) => note.includes("¿Confirmás este pedido?"))).toBe(true);
   });
+
+  // Regresión del mismo bug, otra variante reportada: con el pedido TODAVÍA
+  // incompleto (ej. falta el monto de efectivo porque es un pedido nuevo
+  // que arrancó de cero), el cliente dijo "nada más" y la IA fabricó un
+  // resumen completo en texto libre — con nombre, domicilio y hasta un
+  // monto de pago que en los hechos NO estaban confirmados para ESTE
+  // pedido (los copió del pedido anterior, ya entregado, de la misma
+  // conversación), y encima se contradijo pidiendo ese mismo dato de nuevo.
+  it("si el cliente dice 'nada más' pero el pedido sigue incompleto, avisa qué falta de verdad (nunca un resumen fabricado)", async () => {
+    const { company, branch } = await createTestCompanyAndBranch();
+    companiesToCleanup.push(company.id);
+    const product = await prisma.product.create({
+      data: { companyId: company.id, branchId: branch.id, name: "Torta de Ricota", priceCents: 1500000 },
+    });
+    const conversation = await prisma.conversation.create({
+      data: { companyId: company.id, branchId: branch.id, customerPhone: "5491100000061" },
+    });
+
+    // El pedido nuevo arrancó de cero (el anterior ya se confirmó y
+    // entregó) — todavía falta nombre, domicilio Y el monto de efectivo.
+    const draft = {
+      items: [{ productId: product.id, productName: product.name, unitPriceCents: product.priceCents, quantity: 1 }],
+    };
+
+    const result = await applyActions({
+      companyId: company.id,
+      branchId: branch.id,
+      conversationId: conversation.id,
+      customerPhone: "5491100000061",
+      draft,
+      actions: [],
+      customerMessageText: "nada más",
+    });
+
+    expect(result.correctionNotes.some((note) => note.includes("tu nombre"))).toBe(true);
+    // Nunca un resumen con datos inventados.
+    expect(result.correctionNotes.some((note) => note.includes("¿Confirmás este pedido?"))).toBe(false);
+  });
+});
+
+// Regresión de un bug real reportado: "mandame OTRA torta de ricota más"
+// después de un pedido anterior (ya entregado) de 1 torta — la IA propuso
+// 2 como cantidad total (sumando sola el pedido anterior), cuando el
+// cliente pidió 1 más, para un pedido nuevo.
+describe("applyActions — 'otra X más' después de un pedido entregado del mismo producto", () => {
+  const companiesToCleanup: string[] = [];
+
+  afterAll(async () => {
+    for (const companyId of companiesToCleanup) await cleanupCompany(companyId);
+  });
+
+  it("corrige la cantidad a 1 usando 'otra' del mensaje del cliente", async () => {
+    const { company, branch } = await createTestCompanyAndBranch();
+    companiesToCleanup.push(company.id);
+    const product = await prisma.product.create({
+      data: { companyId: company.id, branchId: branch.id, name: "Torta de Ricota", priceCents: 1500000 },
+    });
+    const conversation = await prisma.conversation.create({
+      data: { companyId: company.id, branchId: branch.id, customerPhone: "5491100000062" },
+    });
+
+    await prisma.order.create({
+      data: {
+        companyId: company.id,
+        branchId: branch.id,
+        conversationId: conversation.id,
+        customerPhone: "5491100000062",
+        customerName: "EstefyLuz",
+        deliveryAddressRaw: "Calle Falsa 123",
+        status: "ON_THE_WAY",
+        paymentMethod: "CASH",
+        cashPaymentAmountCents: 2000000,
+        subtotalCents: 1500000,
+        totalCents: 1500000,
+        delayMinutesAtOrder: 40,
+        estimatedDeliveryAt: new Date(Date.now() - 5 * 60_000),
+        items: {
+          create: [
+            {
+              companyId: company.id,
+              branchId: branch.id,
+              productId: product.id,
+              productName: product.name,
+              unitPriceCents: product.priceCents,
+              quantity: 1,
+              subtotalCents: 1500000,
+            },
+          ],
+        },
+      },
+    });
+
+    const result = await applyActions({
+      companyId: company.id,
+      branchId: branch.id,
+      conversationId: conversation.id,
+      customerPhone: "5491100000062",
+      draft: EMPTY_DRAFT_ORDER,
+      actions: [{ type: "add_item", productName: "Torta de Ricota", quantity: 2 }],
+      customerMessageText: "Gracias, me mandas otra torta de ricota más por favor?",
+    });
+
+    expect(result.draft.items[0].quantity).toBe(1);
+  });
 });

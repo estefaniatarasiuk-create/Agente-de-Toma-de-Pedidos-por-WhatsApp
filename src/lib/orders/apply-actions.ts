@@ -30,6 +30,22 @@ import {
 
 export type OutboundExtra = { kind: "text"; text: string } | { kind: "catalog_image" };
 
+// Compartido entre el bloqueo de confirm_order y el recordatorio proactivo
+// de abajo (ver "declinedMoreItems" más adelante en este archivo) — mismo
+// mensaje, código, para cualquier lugar que necesite decirle al cliente
+// exactamente qué falta, sin confiar en que la IA lo redacte bien.
+function buildMissingFieldsMessage(draft: DraftOrderState): string {
+  const missing = getMissingOrderFields(draft);
+  if (missing.length === 1 && missing[0] === "monto de efectivo suficiente") {
+    // Bug real reportado: en vez del genérico "todavía me falta el monto
+    // correcto", acá sí tenemos los números a mano — mostrar la plata real
+    // (lo que dijo vs. el total) es mucho más claro que una frase vaga.
+    const itemsTotalCents = computeDraftItemsTotalCents(draft);
+    return `Dijiste que ibas a pagar con ${formatCentsAsArs(draft.cashPaymentAmountCents!)}, pero el total es ${formatCentsAsArs(itemsTotalCents)} — ese monto no alcanza. ¿Con cuánto vas a pagar en total?`;
+  }
+  return `Todavía me falta ${missing.map((field) => MISSING_FIELD_LABEL[field] ?? field).join(", ")} para poder confirmar el pedido.`;
+}
+
 export type ApplyActionsResult = {
   draft: DraftOrderState;
   // Si hay notas de corrección, REEMPLAZAN el "reply" de la IA (se generó
@@ -356,22 +372,11 @@ export async function applyActions(params: {
           // saber qué falta de verdad. Si hay campos faltantes, se los
           // decimos explícitamente en vez del mensaje genérico.
           const missing = getMissingOrderFields(draft);
-          if (missing.length === 1 && missing[0] === "monto de efectivo suficiente") {
-            // Bug real reportado: en vez del genérico "todavía me falta el
-            // monto correcto", acá sí tenemos los números a mano — mostrar
-            // la plata real (lo que dijo vs. el total) es mucho más claro
-            // que una frase vaga.
-            const itemsTotalCents = computeDraftItemsTotalCents(draft);
-            correctionNotes.push(
-              `Dijiste que ibas a pagar con ${formatCentsAsArs(draft.cashPaymentAmountCents!)}, pero el total es ${formatCentsAsArs(itemsTotalCents)} — ese monto no alcanza. ¿Con cuánto vas a pagar en total?`,
-            );
-          } else {
-            correctionNotes.push(
-              missing.length > 0
-                ? `Todavía me falta ${missing.map((field) => MISSING_FIELD_LABEL[field] ?? field).join(", ")} para poder confirmar el pedido.`
-                : `¡Ya tengo todos los datos de tu pedido!\n\n${buildFullOrderSummary(draft)}\n\nSi está todo bien, confirmámelo en tu próximo mensaje para registrarlo.`,
-            );
-          }
+          correctionNotes.push(
+            missing.length > 0
+              ? buildMissingFieldsMessage(draft)
+              : `¡Ya tengo todos los datos de tu pedido!\n\n${buildFullOrderSummary(draft)}\n\nSi está todo bien, confirmámelo en tu próximo mensaje para registrarlo.`,
+          );
         }
         continue;
       }
@@ -530,8 +535,33 @@ export async function applyActions(params: {
   // se empieza a pedir) no aplica: ahí es normal y esperado que falten
   // varios datos a la vez.
   const attemptedConfirmThisTurn = params.actions.some((action) => action.type === "confirm_order");
+  // Bug real reportado: el cliente dijo "nada más" con el pedido TODAVÍA
+  // incompleto (ej. le faltaba el monto de efectivo, porque confirmó un
+  // pedido nuevo que arrancó de cero tras entregarse uno anterior) — la IA
+  // redactó su propio resumen "final" en texto libre, inventando nombre,
+  // domicilio y hasta un monto de pago que en los hechos NO estaban en el
+  // borrador real (los copió de memoria del pedido anterior, ya entregado,
+  // de la misma conversación), y encima se contradijo preguntando ese
+  // mismo dato de nuevo. "nada más" es la señal de que terminó de pedir
+  // productos — en ESE momento, pase lo que pase con el resto del pedido,
+  // la respuesta se arma siempre en código a partir del borrador real.
+  const declinedMoreItems = looksLikeDeclinedMoreItemsText(params.customerMessageText ?? "");
 
-  if (correctionNotes.length === 0 && draftChangedThisTurn) {
+  // Red de seguridad final: el "Estado actual del pedido" en el prompt (ver
+  // engine-prompt.ts) ya le dice a la IA en cada turno qué dato falta, pero
+  // hubo un caso real donde igual armó una respuesta que sonaba a que el
+  // pedido ya estaba completo (se concentró en resolver el domicilio, que
+  // había fallado antes, y nunca volvió a pedir el nombre) — sin llegar a
+  // confirmar nada (confirm_order sigue bloqueado en código si falta un
+  // dato), pero dejando al cliente con la idea de que no faltaba nada. Si al
+  // terminar el turno el pedido quedó A UN SOLO dato de estar completo — el
+  // momento en que más suena a que ya terminó — nos aseguramos de que el
+  // cliente se entere de forma confiable, sin depender de que la IA se haya
+  // acordado de pedirlo en su propio texto. Antes de "productos" (que recién
+  // se empieza a pedir) no aplica: ahí es normal y esperado que falten
+  // varios datos a la vez. No aplica tampoco si ya se va a cubrir el caso
+  // de "nada más" de abajo, que cubre CUALQUIER cantidad de datos faltantes.
+  if (correctionNotes.length === 0 && draftChangedThisTurn && !declinedMoreItems) {
     const missingAfterTurn = getMissingOrderFields(draft);
     if (missingAfterTurn.length === 1 && missingAfterTurn[0] !== "productos") {
       correctionNotes.push(
@@ -545,19 +575,19 @@ export async function applyActions(params: {
   // real ese resumen mostró una cantidad y un total que NO coincidían con
   // el pedido de verdad (18x Chipa/$54.000 cuando el pedido real tenía 6x
   // Chipa/$18.000: la IA "recordó" mal, mezclando un pedido anterior ya
-  // entregado). El disparador fue que el cliente dijera "nada más" — sin
-  // ningún confirm_order de por medio, así que ninguna otra defensa de
-  // código corrió. Acá se reemplaza ese resumen por uno armado en código
-  // con los datos reales del borrador, igual que ya se hace cuando
-  // confirm_order se bloquea por un cambio en el mismo turno — nunca se
-  // confía en que el texto libre de la IA tenga los números bien.
-  if (
-    correctionNotes.length === 0 &&
-    !attemptedConfirmThisTurn &&
-    computeCurrentStep(draft) === "CONFIRMING" &&
-    (draftChangedThisTurn || looksLikeDeclinedMoreItemsText(params.customerMessageText ?? ""))
-  ) {
-    correctionNotes.push(`${buildFullOrderSummary(draft)}\n\n¿Confirmás este pedido?`);
+  // entregado). Acá se reemplaza ese resumen por uno armado en código con
+  // los datos reales del borrador, igual que ya se hace cuando confirm_order
+  // se bloquea por un cambio en el mismo turno — nunca se confía en que el
+  // texto libre de la IA tenga los números bien. Y si el cliente dijo "nada
+  // más" pero el pedido TODAVÍA no está completo (el otro caso real, de
+  // arriba), se le dice qué falta con el mismo mensaje confiable que usa
+  // confirm_order cuando se bloquea — en vez de dejar que la IA invente.
+  if (correctionNotes.length === 0 && !attemptedConfirmThisTurn && (draftChangedThisTurn || declinedMoreItems)) {
+    if (computeCurrentStep(draft) === "CONFIRMING") {
+      correctionNotes.push(`${buildFullOrderSummary(draft)}\n\n¿Confirmás este pedido?`);
+    } else if (declinedMoreItems) {
+      correctionNotes.push(buildMissingFieldsMessage(draft));
+    }
   }
 
   // Si el cliente hizo un cambio real sin intentar confirmar en el mismo
