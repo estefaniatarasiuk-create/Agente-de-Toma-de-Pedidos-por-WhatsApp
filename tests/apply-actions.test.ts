@@ -1852,3 +1852,168 @@ describe("applyActions — recuerda el último dato pendiente cuando el pedido q
     expect(result.correctionNotes).toHaveLength(0);
   });
 });
+
+// Regresión de un bug real reportado: un cliente hizo dos pedidos seguidos
+// en la misma conversación, ambos de 12 Chipa — el primero ya confirmado.
+// En un turno del segundo pedido donde el cliente no mencionó la Chipa ni
+// ningún número (solo confirmaba otro dato), la IA reemitió "add_item" con
+// 24 en vez de 12: sumó el pedido anterior con el nuevo sin que nadie lo
+// pidiera, y el pedido se confirmó por el doble de lo acordado.
+describe("applyActions — add_item no deja que un producto se duplique por confundirse con un pedido anterior", () => {
+  const companiesToCleanup: string[] = [];
+
+  afterAll(async () => {
+    for (const companyId of companiesToCleanup) await cleanupCompany(companyId);
+  });
+
+  it("ignora el aumento si coincide exacto con un pedido reciente del mismo cliente para el mismo producto", async () => {
+    const { company, branch } = await createTestCompanyAndBranch();
+    companiesToCleanup.push(company.id);
+    const product = await prisma.product.create({
+      data: { companyId: company.id, branchId: branch.id, name: "Chipa", priceCents: 300000 },
+    });
+    const conversation = await prisma.conversation.create({
+      data: { companyId: company.id, branchId: branch.id, customerPhone: "5491100000054" },
+    });
+
+    // El primer pedido (ya confirmado) de 12 Chipa.
+    await prisma.order.create({
+      data: {
+        companyId: company.id,
+        branchId: branch.id,
+        conversationId: conversation.id,
+        customerPhone: "5491100000054",
+        customerName: "Estefanía",
+        deliveryAddressRaw: "Calle Falsa 123",
+        status: "WAITING_RECEIPT",
+        paymentMethod: "TRANSFER",
+        subtotalCents: 3600000,
+        totalCents: 3600000,
+        delayMinutesAtOrder: 40,
+        estimatedDeliveryAt: new Date(Date.now() + 40 * 60_000),
+        items: {
+          create: [
+            {
+              companyId: company.id,
+              branchId: branch.id,
+              productId: product.id,
+              productName: product.name,
+              unitPriceCents: product.priceCents,
+              quantity: 12,
+              subtotalCents: 3600000,
+            },
+          ],
+        },
+      },
+    });
+
+    // El segundo pedido ya tiene 12 Chipa en el borrador — la IA intenta
+    // "restatear" el ítem con 24 (12 del pedido anterior + 12 de este) en un
+    // turno donde el cliente no mencionó la Chipa para nada.
+    const draft = {
+      items: [{ productId: product.id, productName: product.name, unitPriceCents: product.priceCents, quantity: 12 }],
+      customerName: "Estefanía",
+    };
+
+    const result = await applyActions({
+      companyId: company.id,
+      branchId: branch.id,
+      conversationId: conversation.id,
+      customerPhone: "5491100000054",
+      draft,
+      actions: [{ type: "add_item", productName: "Chipa", quantity: 24 }],
+      customerMessageText: "sisi, es esa",
+    });
+
+    expect(result.draft.items).toEqual([
+      { productId: product.id, productName: product.name, unitPriceCents: product.priceCents, quantity: 12 },
+    ]);
+  });
+
+  it("sí aplica un aumento que NO coincide con ningún pedido anterior (caso normal, no bloquea por las dudas)", async () => {
+    const { company, branch } = await createTestCompanyAndBranch();
+    companiesToCleanup.push(company.id);
+    const product = await prisma.product.create({
+      data: { companyId: company.id, branchId: branch.id, name: "Chipa", priceCents: 300000 },
+    });
+    const conversation = await prisma.conversation.create({
+      data: { companyId: company.id, branchId: branch.id, customerPhone: "5491100000055" },
+    });
+
+    const draft = {
+      items: [{ productId: product.id, productName: product.name, unitPriceCents: product.priceCents, quantity: 5 }],
+      customerName: "Cliente Test",
+    };
+
+    const result = await applyActions({
+      companyId: company.id,
+      branchId: branch.id,
+      conversationId: conversation.id,
+      customerPhone: "5491100000055",
+      draft,
+      actions: [{ type: "add_item", productName: "Chipa", quantity: 8 }],
+      customerMessageText: "dale, mejor que sean 8",
+    });
+
+    expect(result.draft.items[0].quantity).toBe(8);
+  });
+
+  it("no bloquea un pedido anterior demasiado viejo (fuera de la ventana de confusión razonable)", async () => {
+    const { company, branch } = await createTestCompanyAndBranch();
+    companiesToCleanup.push(company.id);
+    const product = await prisma.product.create({
+      data: { companyId: company.id, branchId: branch.id, name: "Chipa", priceCents: 300000 },
+    });
+    const conversation = await prisma.conversation.create({
+      data: { companyId: company.id, branchId: branch.id, customerPhone: "5491100000056" },
+    });
+
+    await prisma.order.create({
+      data: {
+        companyId: company.id,
+        branchId: branch.id,
+        conversationId: conversation.id,
+        customerPhone: "5491100000056",
+        customerName: "Estefanía",
+        deliveryAddressRaw: "Calle Falsa 123",
+        status: "DELIVERED",
+        paymentMethod: "TRANSFER",
+        subtotalCents: 3600000,
+        totalCents: 3600000,
+        delayMinutesAtOrder: 40,
+        estimatedDeliveryAt: new Date(Date.now() - 48 * 60 * 60_000),
+        createdAt: new Date(Date.now() - 48 * 60 * 60_000),
+        items: {
+          create: [
+            {
+              companyId: company.id,
+              branchId: branch.id,
+              productId: product.id,
+              productName: product.name,
+              unitPriceCents: product.priceCents,
+              quantity: 12,
+              subtotalCents: 3600000,
+            },
+          ],
+        },
+      },
+    });
+
+    const draft = {
+      items: [{ productId: product.id, productName: product.name, unitPriceCents: product.priceCents, quantity: 12 }],
+      customerName: "Estefanía",
+    };
+
+    const result = await applyActions({
+      companyId: company.id,
+      branchId: branch.id,
+      conversationId: conversation.id,
+      customerPhone: "5491100000056",
+      draft,
+      actions: [{ type: "add_item", productName: "Chipa", quantity: 24 }],
+      customerMessageText: "sisi, es esa",
+    });
+
+    expect(result.draft.items[0].quantity).toBe(24);
+  });
+});

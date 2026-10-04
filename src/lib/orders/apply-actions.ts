@@ -141,6 +141,39 @@ export async function applyActions(params: {
       // no infle el pedido — fijar el mismo número de nuevo es un no-op.
       const existing = draft.items.find((item) => item.productId === product.id);
       if (existing) {
+        // Bug real reportado: un cliente hizo DOS pedidos seguidos en la
+        // misma conversación, ambos de 12 Chipa — el primero ya confirmado,
+        // el segundo todavía armándose. En un turno donde el cliente no
+        // mencionó la Chipa ni ningún número (solo confirmaba el domicilio
+        // o el medio de pago), la IA reemitió "add_item" con 24 en vez de
+        // 12: el doble, exactamente la suma de los dos pedidos. Todo indica
+        // que confundió "este pedido" con el anterior (ambos visibles en el
+        // historial de la conversación) y sumó las cantidades solo. Si el
+        // AUMENTO propuesto coincide EXACTO con la cantidad de este mismo
+        // producto en un pedido RECIENTE de este cliente, es sospechoso:
+        // mejor ignorar el aumento (mantener lo que ya había) que arriesgar
+        // duplicar el pedido sin que el cliente lo haya pedido de verdad.
+        const proposedIncrease = action.quantity - existing.quantity;
+        const matchesRecentPastOrder =
+          proposedIncrease > 0
+            ? await prisma.orderItem.findFirst({
+                where: {
+                  productId: product.id,
+                  quantity: proposedIncrease,
+                  order: {
+                    branchId: params.branchId,
+                    customerPhone: params.customerPhone,
+                    createdAt: { gte: new Date(Date.now() - 2 * 60 * 60 * 1000) },
+                  },
+                },
+              })
+            : null;
+        if (matchesRecentPastOrder) {
+          console.warn(
+            `add_item ignorado: la IA intentó subir "${product.name}" de ${existing.quantity} a ${action.quantity} — ese aumento (${proposedIncrease}) coincide exacto con un pedido reciente de este mismo cliente, probable confusión con un pedido distinto.`,
+          );
+          continue;
+        }
         if (existing.quantity !== action.quantity) draftChangedThisTurn = true;
         existing.quantity = action.quantity;
       } else {
